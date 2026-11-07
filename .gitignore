@@ -1,0 +1,21 @@
+node_modules
+dist
+.DS_Store
+*.local
+coverage
+.vercel
+*.tsbuildinfo
+
+# Logs and env files
+*.log
+.env
+.env.*
+
+# Local tool caches
+.code-review-graph/
+.claude/
+
+# Local debug probes (not part of the game)
+scripts/
+scripts-probe.ts
+tests/tmp/

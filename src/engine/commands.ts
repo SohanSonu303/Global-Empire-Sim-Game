@@ -1,0 +1,276 @@
+import { GOODS, INDUSTRIES, MAX_LEVEL, requiredCapital, startCost } from './data';
+import { buyLicence, grantLicence, hasLicence, licenceFee, licences } from './licences';
+import { applyUpgrade, clamp, drawCredit, nextUpgradeCost, salaryOf, wageIndex } from './company';
+import { cancelContract, offerContract } from './contracts';
+import { resolveEvent } from './events';
+import { MAX_RATE_MULT, MIN_RATE_MULT, ensureBanks, isBank, willLend } from './banks';
+import { bidCompany, buyBackStake, buyStake, outsidePct, sellCompany, sellStake } from './ownership';
+import { maxFillToday, stockByTicker, tryFill } from './market';
+import { addNews, fmtMoney } from './news';
+import { addXp, claimGoal, netWorth } from './progress';
+import { checkIn } from './rewards';
+import { acceptJob, bidTender, endWar, startCampaign } from './strategy';
+import { buildWarehouse, releaseStock, setBuyOrder, setLimit, setSellRule, sellToRivals, upgradeWarehouse } from './warehouse';
+import { newCompany, seedInputs } from './world';
+import type { Command, CommandResult, Company, Order, WorldState } from './types';
+
+const ok = (message: string): CommandResult => ({ ok: true, message });
+const fail = (message: string): CommandResult => ({ ok: false, message });
+
+function myCompany(w: WorldState, id: string): Company | undefined {
+  return w.companies.find((c) => c.id === id && c.isPlayer && !c.bankrupt);
+}
+
+/** Apply a player command between ticks. Deterministic given (state, command). */
+export function applyCommand(w: WorldState, cmd: Command): CommandResult {
+  switch (cmd.type) {
+    case 'foundCompany': {
+      const def = GOODS[cmd.good];
+      if (!def) return fail('Unknown product');
+      const name = cmd.name.trim().slice(0, 28);
+      if (!name) return fail('Pick a name');
+      if (w.companies.some((c) => c.name.toLowerCase() === name.toLowerCase())) return fail('That name is taken');
+      const ind = def.industry;
+      if (!hasLicence(w, ind) && licences(w).length > 0) return fail(`You need a ${INDUSTRIES[ind].name} licence first (${fmtMoney(licenceFee(w, ind))})`);
+      const price = startCost(cmd.good);
+      if (w.player.cash < price) return fail(`Founding costs ${fmtMoney(price)}`);
+      grantLicence(w, ind); // your first industry's licence is free
+      w.player.cash -= price;
+      w.seq += 1;
+      const c = newCompany(w, { id: `p${w.seq}`, name, good: cmd.good, ownerId: 'player', isPlayer: true, ticker: null, level: 1 });
+      const plant = price - requiredCapital(cmd.good);
+      c.cash = plant * 0.35; // working capital; the rest is fixed assets
+      c.assets = plant * 0.65;
+      const capital = requiredCapital(cmd.good);
+      if (capital > 0) { c.cash += capital; c.lockedCapital = capital; }
+      seedInputs(w, c, 2); // a starter delivery of inputs comes with the plant
+      if (cmd.priceMult) c.priceMult = Math.max(0.5, Math.min(2, cmd.priceMult));
+      w.companies.push(c);
+      w.macro.capexMonth += plant * 0.65;
+      ensureBanks(w);
+      addNews(w, 'player', `${name} opens its doors`, `A new ${def.name.toLowerCase()} producer enters the Astoria market.`, 'good', [c.id]);
+      return ok(`${name} founded`);
+    }
+    case 'upgrade': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      if (c.level >= MAX_LEVEL) return fail('Already at max level');
+      const cost = nextUpgradeCost(c);
+      const fromCompany = Math.min(Math.max(0, c.cash - c.automation.minCash - (c.lockedCapital ?? 0)), cost);
+      const fromPlayer = cost - fromCompany;
+      if (fromPlayer > w.player.cash) return fail(`Need ${fmtMoney(cost)} (company + personal cash)`);
+      c.cash -= fromCompany;
+      w.player.cash -= fromPlayer;
+      applyUpgrade(w, c);
+      return ok(`${c.name} upgraded to level ${c.level}${fromPlayer > 0 ? ` (${fmtMoney(fromPlayer)} from you)` : ''}`);
+    }
+    case 'hire': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      const n = Math.round(cmd.count);
+      if (n > 0) {
+        const cost = n * salaryOf(c) * 5 * wageIndex(w);
+        if (c.cash < cost) return fail(`Hiring costs ${fmtMoney(cost)} of company cash`);
+        c.cash -= cost;
+        c.workers += n;
+        return ok(`Hired ${n} staff`);
+      }
+      if (n < 0) {
+        c.workers = Math.max(0, c.workers + n);
+        c.morale = clamp(c.morale - 0.05, 0, 1);
+        return ok(`Laid off ${-n} staff`);
+      }
+      return fail('Nothing to do');
+    }
+    case 'setPrice': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      c.priceMult = clamp(cmd.priceMult, 0.5, 2);
+      c.priceSetDay = w.day;
+      return ok('Price updated');
+    }
+    case 'setSalary': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      c.salaryMult = clamp(cmd.salaryMult, 0.6, 1.8);
+      return ok('Salaries updated');
+    }
+    case 'setSpend': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      c.marketingPct = clamp(cmd.marketingPct, 0, 0.15);
+      c.rdPct = clamp(cmd.rdPct, 0, 0.15);
+      return ok('Budget updated');
+    }
+    case 'setAutomation': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      c.automation = { ...c.automation, ...cmd.automation };
+      c.automation.dividendPct = clamp(c.automation.dividendPct, 0, 100);
+      c.automation.inventoryDays = clamp(c.automation.inventoryDays, 0, 5);
+      c.automation.minCash = Math.max(0, c.automation.minCash);
+      c.automation.supplyDays = clamp(c.automation.supplyDays ?? 4, 1, 20);
+      return ok('Automation updated');
+    }
+    case 'borrow': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      const amt = drawCredit(w, c, cmd.amount, 'you borrowed');
+      if (amt <= 0) return fail('Credit limit reached');
+      return ok(`Borrowed ${fmtMoney(amt)}`);
+    }
+    case 'repay': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      const amt = Math.min(cmd.amount, c.debt, c.cash);
+      if (amt <= 0) return fail('Nothing to repay');
+      c.debt -= amt;
+      c.cash -= amt;
+      return ok(`Repaid ${fmtMoney(amt)}`);
+    }
+    case 'transfer': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      if (cmd.amount > 0) {
+        const amt = Math.min(cmd.amount, w.player.cash);
+        if (amt <= 0) return fail('No personal cash');
+        w.player.cash -= amt;
+        c.cash += amt;
+        return ok(`Invested ${fmtMoney(amt)} into ${c.name}`);
+      }
+      if (c.ticker || outsidePct(c) > 0) return fail(`Other owners share ${c.name}: take money out as dividends so they get their part`);
+      const amt = Math.min(-cmd.amount, c.cash - (c.lockedCapital ?? 0));
+      if (amt <= 0) return fail(c.lockedCapital ? `${c.name} must keep its ${fmtMoney(c.lockedCapital)} of bank capital` : 'No company cash');
+      c.cash -= amt;
+      w.player.cash += amt;
+      return ok(`Withdrew ${fmtMoney(amt)}`);
+    }
+    case 'placeOrder': {
+      const s = stockByTicker(w, cmd.ticker);
+      if (!s) return fail('Unknown ticker');
+      const qty = Math.floor(cmd.qty);
+      if (qty <= 0) return fail('Enter a quantity');
+      if (cmd.side === 'sell' && (w.player.holdings[s.ticker]?.shares ?? 0) < qty) return fail('You do not own that many shares');
+      if (cmd.orderType === 'limit' && !(cmd.limit && cmd.limit > 0)) return fail('Enter a limit price');
+      w.seq += 1;
+      const o = {
+        id: `o${w.seq}`, ownerId: 'player', ticker: s.ticker, side: cmd.side, type: cmd.orderType, qty, filled: 0,
+        limit: cmd.orderType === 'limit' ? cmd.limit! : null, createdDay: w.day, status: 'open' as Order['status'], avgFill: 0, lastFillDay: -1, filledToday: 0,
+      };
+      w.orders.push(o);
+      const filled = tryFill(w, o);
+      if (o.status === 'filled') return ok(`${cmd.side === 'buy' ? 'Bought' : 'Sold'} ${filled.toLocaleString()} ${s.ticker} @ $${o.avgFill.toFixed(2)}`);
+      if (filled > 0) return ok(`Filled ${filled.toLocaleString()} of ${qty.toLocaleString()} (liquidity limit ${maxFillToday(s).toLocaleString()}/day). Rest stays open.`);
+      return ok(cmd.orderType === 'limit' ? 'Limit order placed' : 'Order queued: not enough cash or liquidity right now');
+    }
+    case 'cancelOrder': {
+      const o = w.orders.find((x) => x.id === cmd.orderId && x.ownerId === 'player');
+      if (!o || o.status !== 'open') return fail('Order not open');
+      o.status = 'cancelled';
+      return ok('Order cancelled');
+    }
+    case 'claimGoal':
+      return claimGoal(w, cmd.goalId);
+    case 'resolveEvent':
+      return resolveEvent(w, cmd.eventId, cmd.choiceId);
+    case 'setSisterDiscount': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      c.sisterDiscount = clamp(cmd.discount, 0, 0.5);
+      return ok(c.sisterDiscount > 0 ? `Your companies now get ${Math.round(c.sisterDiscount * 100)}% off` : 'Your companies now pay the full price');
+    }
+    case 'offerContract': {
+      const c = myCompany(w, cmd.companyId);
+      const partner = w.companies.find((x) => x.id === cmd.partnerId && !x.isPlayer && !x.bankrupt);
+      if (!c || !partner) return fail('Company not found');
+      return offerContract(w, c, partner, cmd.side, cmd.qtyPerDay, cmd.price, cmd.days);
+    }
+    case 'cancelContract':
+      return cancelContract(w, cmd.contractId);
+    case 'sellStake': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      if (c.ticker) return fail('Listed company: its shares trade on the exchange');
+      return sellStake(w, c, cmd.pct, cmd.buyerId);
+    }
+    case 'buyBackStake': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      return buyBackStake(w, c, cmd.partnerId);
+    }
+    case 'buyStake': {
+      const c = w.companies.find((x) => x.id === cmd.companyId && !x.isPlayer);
+      if (!c) return fail('Company not found');
+      return buyStake(w, c, cmd.pct);
+    }
+    case 'bidCompany': {
+      const c = w.companies.find((x) => x.id === cmd.companyId && !x.isPlayer);
+      if (!c) return fail('Company not found');
+      return bidCompany(w, c, cmd.premium, cmd.mode);
+    }
+    case 'sellCompany': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      return sellCompany(w, c, cmd.buyerId);
+    }
+    case 'chooseBank': {
+      const c = myCompany(w, cmd.companyId);
+      const b = w.companies.find((x) => x.id === cmd.bankId && isBank(x) && !x.bankrupt);
+      if (!c || !b) return fail('Not found');
+      if (!willLend(w, b, c)) return fail(`${b.name} will not lend to ${c.name}`);
+      c.bankId = b.id;
+      return ok(`${c.name} now borrows from ${b.name}`);
+    }
+    case 'buyLicence':
+      return buyLicence(w, cmd.industry);
+    case 'setLoanRate': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c || !isBank(c)) return fail('Not one of your banks');
+      c.loanRateMult = clamp(cmd.mult, MIN_RATE_MULT, MAX_RATE_MULT);
+      return ok(`${c.name} now charges ${Math.round(c.loanRateMult * 100)}% of the usual loan margin`);
+    }
+    case 'seenLevel':
+      w.play.levelSeen = w.player.level;
+      return ok('');
+    case 'seenReport':
+      w.play.reportSeen = cmd.id;
+      return ok('');
+    case 'seenStreak':
+      if (w.play.streak.reward) w.play.streak.reward.seen = true;
+      return ok('');
+    case 'seenCampaign': {
+      const x = w.play.campaigns.find((y) => y.id === cmd.id);
+      if (x) x.seen = true;
+      return ok('');
+    }
+    case 'checkIn':
+      return checkIn(w, cmd.date, netWorth(w), (xp) => addXp(w, xp));
+    case 'acceptJob':
+      return acceptJob(w, cmd.jobId, cmd.companyId);
+    case 'startCampaign':
+      return startCampaign(w, cmd.companyId, cmd.size, cmd.weeks);
+    case 'buildWarehouse':
+      return buildWarehouse(w);
+    case 'upgradeWarehouse':
+      return upgradeWarehouse(w, cmd.id);
+    case 'setWarehouseLimit':
+      return setLimit(w, cmd.id, cmd.good, cmd.share);
+    case 'releaseStock':
+      return releaseStock(w, cmd.id, cmd.good, cmd.qty);
+    case 'setBuyOrder':
+      return setBuyOrder(w, cmd.warehouseId, cmd.good, cmd.perDay, cmd.maxPrice);
+    case 'setSellRule':
+      return setSellRule(w, cmd.id, cmd.good, cmd.above, cmd.shortage);
+    case 'sellToRivals':
+      return sellToRivals(w, cmd.id, cmd.good, cmd.qty);
+    case 'bidTender':
+      return bidTender(w, cmd.tenderId, cmd.companyId, cmd.price);
+    case 'endWar':
+      return endWar(w, cmd.warId);
+    case 'seenAchievement': {
+      const a = w.achievements.find((x) => x.id === cmd.id);
+      if (a) a.seen = true;
+      return ok('');
+    }
+  }
+}

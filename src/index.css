@@ -1,0 +1,202 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens (extracted from the navy + gold UI direction).
+ * Every screen uses these via Tailwind utilities: bg-card, text-gold, border-line, ...
+ */
+@theme {
+  --color-bg: #0b1424;
+  --color-surface: #101c31;
+  --color-card: #15233b;
+  --color-card-2: #1b2c49;
+  --color-line: #273a5a;
+  --color-line-strong: #3a5079;
+  --color-gold: #e3b04b;
+  --color-gold-2: #f0c565;
+  --color-gold-edge: #9c7320;
+  --color-gold-ink: #241803;
+  --color-text: #e9eef7;
+  --color-muted: #9aa9c4;
+  --color-dim: #6c7d9c;
+  --color-green: #3dbb6c;
+  --color-green-dim: #1d4b33;
+  --color-red: #e2574c;
+  --color-red-dim: #5a2427;
+  --color-amber: #f0a33a;
+  --color-blue: #4a8fe0;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* type scale: 12px minimum body */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 15px;
+  --text-base--line-height: 21px;
+  --text-lg: 17px;
+  --text-lg--line-height: 23px;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 30px;
+
+  --spacing-gutter: 16px;
+  --spacing-tap: 44px;
+  --radius-card: 10px;
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 2px 6px rgb(0 0 0 / 0.25);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.btn-edge {
+  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.28), 0 1px 2px rgb(0 0 0 / 0.3);
+}
+.btn-edge:active {
+  box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.28);
+  transform: translateY(1px);
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes seal-in {
+  0% { transform: scale(0.6) rotate(-8deg); opacity: 0; }
+  70% { transform: scale(1.05) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+.anim-sheet { animation: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.anim-fade { animation: fade-in 160ms ease-out; }
+.anim-seal { animation: seal-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+@keyframes day-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes pop {
+  0% { transform: scale(0.4) rotate(-30deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes ping-soft {
+  0% { box-shadow: 0 0 0 0 rgb(227 176 75 / 0.55); }
+  100% { box-shadow: 0 0 0 10px rgb(227 176 75 / 0); }
+}
+.anim-day { transform-origin: left; animation-name: day-fill; animation-timing-function: linear; animation-fill-mode: forwards; }
+.anim-pop { animation: pop 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.anim-ping-soft { animation: ping-soft 1.6s ease-out infinite; }
+
+@keyframes float-up {
+  0% { transform: translateY(6px); opacity: 0; }
+  15% { transform: translateY(0); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(-22px); opacity: 0; }
+}
+@keyframes banner-in {
+  0% { transform: translateY(-120%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes crane {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(10deg); }
+}
+@keyframes shine {
+  0% { background-position: -150% 0; }
+  100% { background-position: 250% 0; }
+}
+@keyframes grade-in {
+  0% { transform: scale(2.2) rotate(-12deg); opacity: 0; }
+  60% { transform: scale(0.92) rotate(3deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+.anim-float { animation: float-up 1.8s ease-out forwards; }
+.anim-banner { animation: banner-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.anim-crane { animation: crane 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: 0% 100%; }
+.anim-grade { animation: grade-in 600ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.shine { background-image: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.25) 50%, transparent 70%); background-size: 200% 100%; animation: shine 2.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-float, .anim-banner, .anim-crane, .anim-grade, .shine { animation: none; }
+  .anim-sheet, .anim-fade, .anim-seal, .anim-pop, .anim-ping-soft { animation: none; }
+  .anim-day { animation: none; transform: scaleX(1); }
+}
+
+/* Isometric art animations */
+@keyframes iso-smoke {
+  0% { transform: translate(0, 0) scale(0.7); opacity: 0; }
+  20% { opacity: 0.9; }
+  100% { transform: translate(6px, -16px) scale(1.3); opacity: 0; }
+}
+@keyframes iso-blink {
+  0%, 60% { opacity: 1; }
+  80%, 100% { opacity: 0.2; }
+}
+@keyframes iso-flame {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(0.85, 1.2); }
+}
+@keyframes iso-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(var(--tick)); }
+}
+.iso-smoke { animation: iso-smoke 2.8s ease-out infinite; transform-box: fill-box; }
+.iso-blink { animation: iso-blink 1.6s steps(1, end) infinite; }
+.iso-flame { animation: iso-flame 0.6s ease-in-out infinite; }
+.iso-ticker { animation: iso-ticker 30s linear infinite; }
+@keyframes iso-spin { to { transform: rotate(360deg); } }
+.iso-spin { animation: iso-spin 3s linear infinite; }
+@keyframes chain-flow { to { stroke-dashoffset: -14; } }
+.chain-flow { stroke-dasharray: 5 2; animation: chain-flow 0.8s linear infinite; }
+@keyframes park-flow { to { stroke-dashoffset: -15; } }
+.park-flow { animation: park-flow 1.1s linear infinite; }
+.paper {
+  --paper: #f2ede3;
+  --paper-2: #e8e1d3;
+  --paper-rule: #c9bfae;
+  --ink: #1d1a16;
+  --ink-2: #5b544a;
+  background: var(--paper);
+  background-image: radial-gradient(rgb(120 100 70 / 0.05) 1px, transparent 1px);
+  background-size: 3px 3px;
+  color: var(--ink);
+}
+.park-road { animation: park-flow 2.4s linear infinite; }
+.iso-hit { transition: filter 120ms; }
+.iso-hit:hover, .iso-hit:focus-visible { filter: brightness(1.12) drop-shadow(0 0 4px rgb(227 176 75 / 0.6)); outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .iso-smoke, .iso-blink, .iso-flame, .iso-ticker, .iso-spin, .chain-flow, .park-flow, .park-road { animation: none; }
+}
