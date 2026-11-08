@@ -4,7 +4,8 @@
  */
 import { portfolioValue } from './market';
 import { addNews, fmtMoney, fmtPct } from './news';
-import type { Banner, MonthReport, Play, RecordId, WorldState } from './types';
+import { companyValue } from './company';
+import type { Banner, MonthReport, Play, RecordId, Rival, WorldState } from './types';
 
 // ---------- level unlocks ----------
 
@@ -50,7 +51,7 @@ export function emptyPlay(level = 1): Play {
     records: {}, banners: [], pops: [], levelSeen: level, reports: [], reportSeen: null,
     streak: { last: '', count: 0, best: 0 },
     jobs: [], tenders: [], campaigns: [], warehouses: [], buyOrders: [], wars: [], tips: [], aiStores: [],
-    probes: {}, upgraded: {}, xpOwed: 0,
+    probes: {}, upgraded: {}, xpOwed: 0, auctions: [], disasters: [],
   };
 }
 
@@ -70,10 +71,18 @@ export function banner(w: WorldState, title: string, body: string, xp = 0, tone:
 
 // ---------- daily: pops and records ----------
 
-const RECORD_STEP = 1.1;
+/** A new record must beat the old one by 25%, so a growing empire does not level up from records alone. */
+const RECORD_STEP = 1.25;
+
+/** A rival's wealth: cash, shares, and the private companies it owns outright. */
+export function rivalWorth(w: WorldState, r: Rival): number {
+  let v = r.cash + portfolioValue(w, r.holdings);
+  for (const c of w.companies) if (c.ownerId === r.id && !c.ticker && !c.bankrupt) v += Math.max(0, companyValue(c));
+  return v;
+}
 
 function rivalWorths(w: WorldState): number[] {
-  return w.rivals.map((r) => r.cash + portfolioValue(w, r.holdings));
+  return w.rivals.map((r) => rivalWorth(w, r));
 }
 
 export function playerRank(w: WorldState, nw: number): { rank: number; of: number } {

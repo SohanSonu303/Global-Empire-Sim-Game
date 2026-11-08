@@ -86,7 +86,7 @@ function Derrick({ x, y, h }: { x: number; y: number; h: number }) {
   );
 }
 
-export function OilGas({ level = 1 }: { level?: number }) {
+export function OilGas({ level = 1, gas }: { level?: number; gas?: boolean }) {
   const derricks = lvl(level, 1, 2, 4);
   const tanks = lvl(level, 1, 3, 3);
   const dh = 2.6 + Math.min(1.2, level * 0.08);
@@ -96,12 +96,19 @@ export function OilGas({ level = 1 }: { level?: number }) {
       <Box x={0.15} y={0.15} w={2.7} d={2.7} h={0.22} c="#c9a24a" />
       {/* stripes on deck edge */}
       {[0, 1, 2, 3, 4, 5].map((i) => <polygon key={i} points={faceQuad('left', 0.15, 0.15, 0, 2.7, 2.7, i * 0.45, i * 0.45 + 0.22, 0, 0.22)} fill="#2b2e36" />)}
-      <Derrick x={0.85} y={0.85} h={dh} />
-      {derricks > 1 && <Derrick x={2.05} y={0.75} h={dh * 0.85} />}
+      {!gas && <Derrick x={0.85} y={0.85} h={dh} />}
+      {!gas && derricks > 1 && <Derrick x={2.05} y={0.75} h={dh * 0.85} />}
+      {gas && Array.from({ length: derricks + 1 }, (_, i) => (
+        <g key={i}>
+          <Box x={0.45 + i * 0.7} y={0.5} z={0.22} w={0.3} d={0.3} h={0.35} c="#e3b04b" sw={0.4} />
+          <Cyl cx={0.6 + i * 0.7} cy={0.65} z={0.57} r={0.06} h={0.3} c="#d8434e" sw={0.4} />
+        </g>
+      ))}
+      {gas && <Cyl cx={2.35} cy={0.75} z={0.22} r={0.42} h={0.75} c="#7fb7e6" top="#a9d2f2" />}
       <Box x={0.45} y={1.5} z={0.22} w={0.8} d={0.6} h={0.45} c="#4c5566" />
       <Windows face="left" x={0.45} y={1.5} z={0.22} w={0.8} d={0.6} h={0.45} rows={1} cols={2} color="#f6d98a" seed={3} />
       {[...Array(tanks)].map((_, i) => (
-        <Cyl key={i} cx={1.6 + (i % 2) * 0.75} cy={1.75 + Math.floor(i / 2) * 0.7} z={0.22} r={0.3} h={0.55} c="#e9eef7" top="#f6f7fa" />
+        <Cyl key={i} cx={1.6 + (i % 2) * 0.75} cy={1.75 + Math.floor(i / 2) * 0.7} z={0.22} r={0.3} h={0.55} c={gas ? '#bcd9f0' : '#e9eef7'} top="#f6f7fa" />
       ))}
       <line x1={P(1.25, 1.8, 0.5)[0]} y1={P(1.25, 1.8, 0.5)[1]} x2={P(1.6, 1.8, 0.5)[0]} y2={P(1.6, 1.8, 0.5)[1]} stroke="#e3b04b" strokeWidth="1.5" />
       {/* flare stack */}
@@ -174,7 +181,7 @@ export function Retail({ level = 1 }: { level?: number }) {
 }
 
 /** Mine & farm: headframe with winding wheel, ore heaps, conveyor and a silo. */
-export function Mine({ level = 1 }: { level?: number }) {
+export function Mine({ level = 1, ore = '#7b4a32', ground = '#8a7350', silo = '#d8c38f', ponds }: { level?: number; ore?: string; ground?: string; silo?: string; ponds?: string }) {
   const heaps = lvl(level, 1, 3, 3);
   const silos = lvl(level, 1, 3, 4);
   const hh = 1.9 + Math.min(1, level * 0.08);
@@ -182,7 +189,8 @@ export function Mine({ level = 1 }: { level?: number }) {
   const legs = [P(0.55, 0.55), P(1.25, 0.55), P(1.25, 1.25), P(0.55, 1.25)];
   return (
     <g>
-      <Tile x={0} y={0} w={3} d={3} fill="#8a7350" />
+      <Tile x={0} y={0} w={3} d={3} fill={ground} />
+      {ponds && [0, 1].map((i) => <Tile key={i} x={1.75 + i * 0.6} y={0.2} w={0.5} d={1.1} fill={i ? shade(ponds, 0.85) : ponds} stroke="#f6f7fa" />)}
       {/* headframe */}
       <g stroke="#3a3f4a" strokeWidth="1.1">
         {legs.map((l, i) => <line key={i} x1={l[0]} y1={l[1]} x2={wx} y2={wy + 4} />)}
@@ -195,9 +203,9 @@ export function Mine({ level = 1 }: { level?: number }) {
       {Array.from({ length: heaps }, (_, i) => {
         const [hx, hy] = P(1.9 + (i % 2) * 0.55, 1.5 + i * 0.5, 0);
         const r = 9 - i;
-        return <path key={i} d={`M${hx - r} ${hy} Q${hx} ${hy - r * 1.4} ${hx + r} ${hy} Z`} fill={shade('#7b4a32', -i * 0.08)} stroke={OUTLINE} strokeWidth="0.5" />;
+        return <path key={i} d={`M${hx - r} ${hy} Q${hx} ${hy - r * 1.4} ${hx + r} ${hy} Z`} fill={shade(ore, 1 - i * 0.08)} stroke={OUTLINE} strokeWidth="0.5" />;
       })}
-      {Array.from({ length: silos }, (_, i) => <Cyl key={i} cx={0.45 + i * 0.5} cy={2.4} r={0.2} h={0.9 + i * 0.1} c="#d8c38f" stripes="#a8925f" />)}
+      {Array.from({ length: silos }, (_, i) => <Cyl key={i} cx={0.45 + i * 0.5} cy={2.4} r={0.2} h={0.9 + i * 0.1} c={silo} stripes={shade(silo, 0.78)} />)}
       <Person x={1.6} y={2.7} shirt="#f0a33a" hat="#e3b04b" s={0.9} />
     </g>
   );

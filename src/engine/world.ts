@@ -8,7 +8,9 @@ import { createGoodsMarket, operateEconomy } from './economy';
 import { createMacro } from './macro';
 import { fairValue } from './market';
 import { createGoals } from './progress';
-import { addNews } from './news';
+import { addNews, fmtMoney } from './news';
+import { setTraits } from './traits';
+import type { GameSetup } from './startup';
 import type { Company, GoodId, ScenarioId, Stock, WorldState } from './types';
 
 export function newCompany(
@@ -95,20 +97,43 @@ export function addMissingGoods(w: WorldState): void {
       w.companies.push(c);
     }
   }
+  // Existing plants that now use a new material get a starter delivery of it, like a new plant would
+  for (const c of w.companies) {
+    if (c.bankrupt || missing.includes(c.good)) continue;
+    for (const i of GOODS[c.good].inputs) {
+      if (!missing.includes(i.good) || c.inputs[i.good]) continue;
+      c.inputs[i.good] = { qty: c.capacity * 0.7 * i.qty * 5, cost: refPrice(w, i.good) };
+    }
+  }
+  // The new businesses buy steel, chips, power and more: existing producers grow to meet them
+  const before = chainDemand(missing);
+  for (const g of GOOD_IDS) {
+    if (missing.includes(g)) continue;
+    const k = Math.min(2.5, demand[g] / Math.max(1, before[g]));
+    if (k < 1.03) continue;
+    for (const c of w.companies) {
+      if (c.good !== g || c.isPlayer || c.bankrupt) continue;
+      c.capacity *= k;
+      c.level = Math.max(1, 1 + Math.round(Math.log(c.capacity / GOODS[g].baseCapacity) / Math.log(LEVEL_CAP_MULT)));
+      c.workers *= k;
+      c.inventory *= k;
+      c.last.demand *= k;
+    }
+  }
   const names = missing.map((g) => GOODS[g].name.toLowerCase());
   addNews(w, 'business', 'New industries open in Astoria',
     `Markets for ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} are now open to new companies.`, 'good');
 }
 
 /** Total daily demand for every good: final demand plus what downstream producers use. */
-export function chainDemand(): Record<GoodId, number> {
+export function chainDemand(without: GoodId[] = []): Record<GoodId, number> {
   const d = {} as Record<GoodId, number>;
-  for (const id of GOOD_IDS) d[id] = GOODS[id].d0;
+  for (const id of GOOD_IDS) d[id] = without.includes(id) ? 0 : GOODS[id].d0;
   for (const id of [...GOOD_IDS].reverse()) for (const i of GOODS[id].inputs) d[i.good] += d[id] * i.qty;
   return d;
 }
 
-export function createWorld(seed: number, scenario: ScenarioId = 'young'): WorldState {
+export function createWorld(seed: number, scenario: ScenarioId = 'young', setup?: GameSetup): WorldState {
   const rng = createRng(seed);
   const w: WorldState = {
     version: SAVE_VERSION, seed, rng, day: 0, scenario, countryName: 'Republic of Astoria',
@@ -119,7 +144,7 @@ export function createWorld(seed: number, scenario: ScenarioId = 'young'): World
     companies: [], stocks: [], orders: [], macro: createMacro(),
     rivals: RIVALS.map((r) => ({
       id: r.id, name: r.name, title: r.title, focus: r.focus, weakness: r.weakness, quote: r.quote, flag: r.flag,
-      personality: r.personality, cash: r.cash, holdings: {}, relation: r.id === 'kane' ? -20 : 0, memory: [], avatarColor: r.avatarColor,
+      personality: r.personality, cash: r.cash, holdings: {}, relation: r.id === 'kane' ? -20 : 0, memory: [], avatarColor: r.avatarColor, ...(r.tycoon ? { tycoon: true } : {}),
     })),
     news: [], pending: [], goals: createGoals(), achievements: [],
     marketMood: 0.55, marketIndexHist: [], marketIndex: 1000, indexBase: 0, lastDilemmaDay: 0, effects: [], seq: 0, play: emptyPlay(),
@@ -162,6 +187,22 @@ export function createWorld(seed: number, scenario: ScenarioId = 'young'): World
     w.companies.push(c);
   }
 
+  // Startup story: your payout buys a small existing company (it runs through the warm-up, so it has customers and history)
+  if (setup?.startup) w.player.cash = setup.startup.payout;
+  if (setup?.starter && GOODS[setup.starter.good] && w.player.cash >= setup.starter.price) {
+    const st = setup.starter;
+    const c = newCompany(w, { id: 'p1', name: st.name.slice(0, 28), good: st.good, ownerId: 'player', isPlayer: true, ticker: null, level: 1 });
+    seedInputs(w, c, 4);
+    c.cash = Math.round(st.price * 0.2);
+    c.assets = st.price - c.cash;
+    c.brand = 0.85;
+    c.quality = 0.9;
+    w.player.cash -= st.price;
+    w.companies.push(c);
+  }
+  if (setup) setTraits(w, setup.traits);
+
+  const startCash = w.player.cash;
   // Warm up the economy so companies have a financial history before listing.
   // Halfway through, resize AI producers to what the chain really uses (+15% spare).
   for (let d = 1; d <= 150; d++) {
@@ -203,6 +244,7 @@ export function createWorld(seed: number, scenario: ScenarioId = 'young'): World
     c.strikeUntil = 0;
   }
   w.day = 0;
+  if (setup?.starter) w.player.cash = startCash; // warm-up dividends are not yours yet
   ensureBanks(w);
   ensureLicences(w);
   w.indexBase = w.stocks.reduce((s, x) => s + x.price * x.shares, 0);
@@ -212,6 +254,12 @@ export function createWorld(seed: number, scenario: ScenarioId = 'young'): World
   w.macro.hist.push({ day: 0, gdp: w.macro.gdp, inflation: w.macro.inflation, unemployment: w.macro.unemployment, rate: w.macro.rate, growth: w.macro.growth });
   addNews(w, 'economy', 'Astoria economy steady as new year opens',
     'Growth near trend, inflation slightly above the 2% target and the central bank holding at 3.50%.', 'neutral');
+  if (setup?.startup) {
+    const s = setup.startup;
+    w.player.startup = { idea: s.idea, name: s.name, investor: s.investor, payout: s.payout };
+    addNews(w, 'business', `${s.investor} turns ${s.name} into a ${fmtMoney(s.valuation)} giant`,
+      `The startup you founded is now one of the hottest companies around. You were paid ${fmtMoney(s.payout)} when you sold it.`, 'good');
+  }
   addNews(w, 'business', `Exchange lists ${w.stocks.length} companies across six industries`,
     'Mining, farming, energy, manufacturing, technology, retail and finance shares all trade on the Astoria Exchange.', 'neutral');
   return w;

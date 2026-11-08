@@ -6,6 +6,8 @@ import { stockByTicker } from './market';
 import { outsidePct, transferCompany } from './ownership';
 import { addNews, fmtMoney, fmtPct } from './news';
 import { resolveStrategyEvent } from './strategy';
+import { ownShare } from './disasters';
+import { resolveTycoonEvent } from './tycoons';
 import type { CommandResult, Company, PendingEvent, WorldState } from './types';
 
 /**
@@ -123,14 +125,15 @@ function accidents(w: WorldState): void {
     const id = `ev${++w.seq}`;
     let ev: PendingEvent;
     if (kind === 'fire') {
-      const cost = billFor(c, 0.1, 0.18, 15_000, r);
+      const full = billFor(c, 0.1, 0.18, 15_000, r);
+      const cost = ownShare(c, full);
       c.damage = { mult: 0.5, untilDay: w.day + 120, cause: 'Fire damage' };
       c.inventory *= 0.5;
       c.morale = clamp(c.morale - 0.05, 0, 1);
       ev = {
         id, template: 'fire', day: w.day, companyId: c.id, rivalId: null, expiresDay: w.day + 7,
         title: `Fire at ${c.name}!`,
-        body: `A fire tore through part of the plant. Nobody was hurt, but half the stock is gone and output is down to 50% until it is rebuilt.`,
+        body: `A fire tore through part of the plant. Nobody was hurt, but half the stock is gone and output is down to 50% until it is rebuilt.${cost < full ? ` Your insurance pays ${fmtMoney(full - cost)} of the repairs.` : ''}`,
         choices: [
           { id: 'rebuild', label: `Rebuild properly (${fmtMoney(cost)})`, detail: 'Back to full output in 10 days' },
           { id: 'patch', label: `Quick patch (${fmtMoney(cost * 0.4)})`, detail: '80% output for 60 days' },
@@ -174,7 +177,7 @@ function accidents(w: WorldState): void {
 function aiAccident(w: WorldState, c: Company, kind: 'fire' | 'breakdown' | 'inspection'): void {
   const r = w.rng;
   if (kind === 'fire') {
-    payBill(w, c, billFor(c, 0.1, 0.18, 15_000, r));
+    payBill(w, c, ownShare(c, billFor(c, 0.1, 0.18, 15_000, r)));
     c.damage = { mult: 0.5, untilDay: w.day + 10, cause: 'Fire damage' };
     c.inventory *= 0.5;
     addNews(w, 'business', `Fire at ${c.name}`, `Output of ${GOODS[c.good].name.toLowerCase()} is cut while the plant is rebuilt.`, 'bad', [c.id]);
@@ -270,6 +273,7 @@ export function resolveEvent(w: WorldState, eventId: string, choiceId: string): 
   const rv = w.rivals.find((x) => x.id === ev.rivalId);
   if (!c || c.bankrupt || !c.isPlayer) return { ok: true, message: 'The situation resolved itself.' };
   if (ev.template === 'antitrust' || ev.template === 'venture') return resolveStrategyEvent(w, ev, c, choiceId);
+  if (ev.template === 'tycoonStake') return resolveTycoonEvent(w, ev, c, choiceId);
   const remember = (delta: number, text: string) => {
     if (!rv) return;
     rv.relation = clamp(rv.relation + delta, -100, 100);
@@ -389,6 +393,13 @@ const HYPE: { good: import('./types').GoodId; up: string; down: string }[] = [
   { good: 'medicine', up: 'Flu season empties pharmacy shelves', down: 'A mild winter cuts medicine sales' },
   { good: 'telecom', up: 'Streaming boom drives demand for data plans', down: 'Families trim phone plans' },
   { good: 'clinics', up: 'Clinics packed as a virus spreads', down: 'Fewer patient visits this season' },
+  { good: 'gaming', up: 'A hit game takes Astoria by storm', down: 'Gamers drift away after a run of flops' },
+  { good: 'ai', up: 'Every company wants an AI assistant', down: 'AI budgets cut as the hype cools' },
+  { good: 'ecommerce', up: 'Online shopping hits a record week', down: 'Shoppers return to the high street' },
+  { good: 'real_estate', up: 'Office and flat rents climb', down: 'Empty offices pile up downtown' },
+  { good: 'airlines', up: 'Holiday travel boom fills every flight', down: 'Air travel slumps as fares rise' },
+  { good: 'robots', up: 'Factories race to automate', down: 'Robot orders pause as factories wait' },
+  { good: 'space', up: 'Satellite boom books launches years ahead', down: 'Satellite makers delay launches' },
 ];
 
 const SHOCKS: { good: import('./types').GoodId; headline: string }[] = [
@@ -397,6 +408,11 @@ const SHOCKS: { good: import('./types').GoodId; headline: string }[] = [
   { good: 'iron_ore', headline: 'Mine flooding halts iron ore output' },
   { good: 'silicon', headline: 'Silicon refinery fire cuts supply' },
   { good: 'timber', headline: 'Forest fires halt logging' },
+  { good: 'copper', headline: 'Strike shuts the biggest copper mine' },
+  { good: 'lithium', headline: 'Lithium brine ponds flooded by rain' },
+  { good: 'rare_earths', headline: 'Export ban squeezes rare earth supply' },
+  { good: 'natural_gas', headline: 'Pipeline leak cuts gas supply' },
+  { good: 'bauxite', headline: 'Landslide blocks the bauxite mine road' },
 ];
 
 /** An AI company that uses this player company's good (rival-owned first). */

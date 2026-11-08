@@ -21,7 +21,11 @@ export type GoodId =
   | 'food' | 'clothing'
   | 'banking'
   | 'timber' | 'chemicals' | 'glass' | 'freight'
-  | 'furniture' | 'laptops' | 'medicine' | 'telecom' | 'clinics';
+  | 'furniture' | 'laptops' | 'medicine' | 'telecom' | 'clinics'
+  | 'copper' | 'lithium' | 'bauxite' | 'rare_earths' | 'limestone' | 'natural_gas'
+  | 'aluminium' | 'batteries' | 'cement' | 'water' | 'construction'
+  | 'real_estate' | 'ecommerce' | 'gaming' | 'ai'
+  | 'robots' | 'space' | 'defense' | 'airlines' | 'hospitals' | 'wellness';
 
 export type GoodTier = 'raw' | 'material' | 'product';
 
@@ -48,6 +52,10 @@ export interface GoodDef {
   foundCost: number;
   /** One-line description for the planner */
   blurb: string;
+  /** Government-regulated: prices are capped at the market price, so margins are thin but steady */
+  reg?: boolean;
+  /** A government permit you must buy once before you can run this business (on top of the industry licence) */
+  permit?: number;
   // Derived at load time (see data.ts):
   /** Reference price per unit at price level 1 */
   p0: number;
@@ -110,6 +118,8 @@ export interface Automation {
   autoRepay?: boolean;
   /** Keep the plant running when its own stock is full and send the extra to your warehouses */
   toWarehouse?: boolean;
+  /** Raw producers: pay for new exploration when reserves run low (on unless turned off) */
+  autoExplore?: boolean;
 }
 
 export interface DayResult {
@@ -227,6 +237,16 @@ export interface Company {
   lockedCapital?: number;
   /** Banks only: reserve held against bad loans (not counted as cash) */
   loanReserve?: number;
+  /** Fixed costs scale (1 = normal; lower after selling part of the plant) */
+  fixedScale?: number;
+  /** Player has the Operations expert trait (cheaper upgrades, more output per worker) */
+  ops?: boolean;
+  /** AI companies: months in a row with a loss (they give up after a long run in a crowded market) */
+  lossMonths?: number;
+  /** Disaster insurance (player companies; AI companies use a fixed half-and-half split) */
+  insured?: boolean;
+  /** Raw producers you run: share of the mine, field or well left (1 = fresh, 0 = dry) */
+  reserves?: number;
 }
 
 export interface Stock {
@@ -252,6 +272,8 @@ export interface Stock {
 export interface Holding {
   shares: number;
   avgCost: number;
+  /** Day of the last buy (for trait holding periods) */
+  since?: number;
 }
 
 export type OrderSide = 'buy' | 'sell';
@@ -331,6 +353,12 @@ export interface Rival {
   relation: number;
   memory: { day: number; text: string; delta: number }[];
   avatarColor: string;
+  /** Hands-on tycoons found companies, bid at auctions and offer you deals */
+  tycoon?: boolean;
+  /** Day the tycoon last founded a company */
+  lastMoveDay?: number;
+  /** Day the tycoon last offered to buy into one of your companies */
+  lastOfferDay?: number;
 }
 
 export type NewsCategory =
@@ -370,6 +398,8 @@ export interface PendingEvent {
   expiresDay: number;
   amount?: number;
   good?: GoodId;
+  /** Stake offers: the share on the table */
+  pct?: number;
 }
 
 export interface Goal {
@@ -407,7 +437,16 @@ export interface Player {
   netWorthHist: { day: number; value: number }[];
   /** Industries you may found companies in */
   licences?: IndustryId[];
+  /** Government permits for mega businesses (see GoodDef.permit) */
+  permits?: GoodId[];
+  /** Career traits picked at the start */
+  traits?: TraitId[];
+  traitSwapped?: boolean;
+  /** The startup you sold before the main game */
+  startup?: { idea: string; name: string; investor: string; payout: number };
 }
+
+export type TraitId = 'finance' | 'stocks' | 'raw' | 'deals' | 'ops';
 
 // ---------- rewards and strategies ----------
 
@@ -437,6 +476,8 @@ export interface MonthReport {
   tip: string;
   xp: number;
   parts: { label: string; points: number; max: number }[];
+  /** Trait payouts this month */
+  traits?: { label: string; amount: number }[];
 }
 
 export interface Streak { last: string; count: number; best: number; freezeUsed?: string; reward?: { cash: number; xp: number; count: number; froze: boolean; date: string; seen: boolean } }
@@ -537,6 +578,32 @@ export interface Tip {
   done: boolean;
 }
 
+export interface AuctionBid { day: number; bidderId: string; amount: number }
+
+/** The government sells a bankrupt company to the highest bidder. Its debts are cleared first. */
+export interface Auction {
+  id: string;
+  companyId: string;
+  startDay: number;
+  endDay: number;
+  /** Lowest price the government accepts */
+  reserve: number;
+  /** Highest bid so far (0 = none) */
+  bid: number;
+  /** 'player' or a rival id */
+  bidderId: string | null;
+  bids: AuctionBid[];
+  /** Owner when it went bankrupt (they may not buy it back) */
+  prevOwner?: string;
+  /** The reserve was cut once already after no one bid */
+  relisted?: boolean;
+  status: 'open' | 'sold' | 'scrapped';
+}
+
+export type DisasterKind = 'earthquake' | 'flood' | 'hurricane' | 'wildfire' | 'drought' | 'pandemic' | 'blackout';
+
+export interface DisasterRecord { id: string; day: number; kind: DisasterKind; hit: number; yours: string[]; cost: number; covered: number }
+
 /** A rival's speculative stockpile of a product. */
 export interface AiStore { rivalId: string; good: GoodId; qty: number; cost: number; day: number }
 
@@ -562,6 +629,12 @@ export interface Play {
   upgraded: Record<string, number>;
   /** XP earned inside a tick, paid out by updateProgress */
   xpOwed: number;
+  /** Bankrupt companies the government is selling */
+  auctions: Auction[];
+  /** Natural disasters so far (newest last) */
+  disasters: DisasterRecord[];
+  /** Trait income collected during the month */
+  traitAcc?: { stockGain: number; dividends: number; dealGain: number; jobBonus: number; rawSaved: number; opsSaved: number };
 }
 
 export interface WorldState {
@@ -597,7 +670,7 @@ export interface WorldState {
 export type ScenarioId = 'young' | 'established';
 
 export type Command =
-  | { type: 'foundCompany'; name: string; good: GoodId; priceMult?: number }
+  | { type: 'foundCompany'; name: string; good: GoodId; priceMult?: number; partnerId?: string; partnerPct?: number }
   | { type: 'upgrade'; companyId: string }
   | { type: 'hire'; companyId: string; count: number }
   | { type: 'setPrice'; companyId: string; priceMult: number }
@@ -637,8 +710,13 @@ export type Command =
   | { type: 'setBuyOrder'; warehouseId: string; good: GoodId; perDay: number; maxPrice: number }
   | { type: 'setSellRule'; id: string; good: GoodId; above?: number; shortage?: boolean }
   | { type: 'sellToRivals'; id: string; good: GoodId; qty: number }
+  | { type: 'downsize'; companyId: string }
+  | { type: 'swapTrait'; from: TraitId; to: TraitId }
   | { type: 'bidTender'; tenderId: string; companyId: string; price: number }
-  | { type: 'endWar'; warId: string };
+  | { type: 'endWar'; warId: string }
+  | { type: 'setInsurance'; companyId: string; on: boolean }
+  | { type: 'explore'; companyId: string }
+  | { type: 'bidAuction'; auctionId: string; amount: number };
 
 export interface CommandResult {
   ok: boolean;

@@ -7,10 +7,13 @@
  *     price, brand, quality and size;
  *  4. P&L and cash are booked; each good's price index moves with shortage, input costs and hype.
  */
+import { deplete, extractionMult, isRawMine, RAW_UPKEEP, reserveCapMult } from './resources';
+import { premiumPerDay } from './disasters';
 import { GOODS, GOOD_IDS, IMPORT_PREMIUM, fixedAt } from './data';
 import { clamp, damageMult, drawCredit, emptyDay, finishDay, importPrice, productivity, refPrice, salaryOf, sellPrice, wageIndex, worldIdx } from './company';
 import type { Company, DayResult, GoodId, GoodMarket, WorldState } from './types';
 import { campaignMult, bookDelivery, jobPace, switchMult } from './strategy';
+import { TRAIT_RATES, hasTrait, noteRawSaved } from './traits';
 import { addStock, isStoring, roomFor, store, takeStock, totalRoom } from './warehouse';
 import { FUNDING_SHARE, RESERVE_SPEED, expectedLoss, isBank, lenderOf, loanBooks, loanRate } from './banks';
 
@@ -66,7 +69,7 @@ export function operateEconomy(w: WorldState): void {
     if (c.bankrupt) continue;
     const def = GOODS[c.good];
     const r = emptyDay();
-    const effCap = c.capacity * (def.tier === 'raw' ? effectMult(w, 'goodSupply', c.good) : 1) * damageMult(w, c);
+    const effCap = c.capacity * (def.tier === 'raw' ? effectMult(w, 'goodSupply', c.good) : 1) * damageMult(w, c) * reserveCapMult(c);
     const laborCap = c.strikeUntil > w.day ? 0 : c.workers * productivity(c);
     let materialCap = effCap;
     for (const i of def.inputs) materialCap = Math.min(materialCap, (c.inputs[i.good]?.qty ?? 0) / i.qty);
@@ -84,7 +87,8 @@ export function operateEconomy(w: WorldState): void {
       matCost += use * st.cost;
       st.qty = Math.max(0, st.qty - use);
     }
-    const vcSpend = produced * def.vc * pl;
+    const vcSpend = produced * def.vc * pl * extractionMult(c);
+    deplete(c, produced);
     if (produced > 0) {
       const total = c.inventory + produced;
       c.invCost = (c.inventory * c.invCost + matCost + vcSpend) / total;
@@ -121,12 +125,16 @@ export function operateEconomy(w: WorldState): void {
     for (const x of wants) if (x.qty * scale > 1e-6) requests.push({ buyer: p, good: x.good, qty: x.qty * scale });
   }
 
+  const rawPerk = hasTrait(w, 'raw');
   const pay = (buyer: Plan, seller: Plan | null, good: GoodId, qty: number, unitPrice: number) => {
     if (qty <= 0) return;
     const cost = qty * unitPrice;
-    buyer.c.cash -= cost;
-    buyer.r.purchases += cost;
-    addInput(buyer.c, good, qty, unitPrice);
+    // Raw materials trait: your companies pay less for raw inputs from outside sellers (the seller still gets full price)
+    const perk = rawPerk && buyer.c.isPlayer && GOODS[good].tier === 'raw' && (!seller || seller.c.ownerId !== buyer.c.ownerId) ? 1 - TRAIT_RATES.rawDiscount : 1;
+    if (perk < 1) noteRawSaved(w, cost * (1 - perk));
+    buyer.c.cash -= cost * perk;
+    buyer.r.purchases += cost * perk;
+    addInput(buyer.c, good, qty, unitPrice * perk);
     if (seller) {
       seller.avail -= qty;
       seller.r.sold += qty;
@@ -196,7 +204,8 @@ export function operateEconomy(w: WorldState): void {
     const capW = sellers.reduce((s, p) => s + p.c.capacity, 0);
     const base = def.p0 * pl;
     const avgPrice = capW > 0 ? sellers.reduce((s, p) => s + p.price * p.c.capacity, 0) / capW : refPrice(w, g);
-    const finalMult = def.tier === 'product' || g === 'electricity' ? incomeMult : 1;
+    // Regulated care is needed in good times and bad: income moves it only a little
+    const finalMult = def.reg ? 1 + (incomeMult - 1) * 0.3 : def.tier === 'product' || g === 'electricity' || g === 'water' ? incomeMult : 1;
     const finalD = def.d0 * Math.pow(avgPrice / base, -def.elasticity) * finalMult * effectMult(w, 'goodDemand', g);
     // Your warehouse buy orders bid for local supply like any business buyer (no imports)
     const orders = (w.play?.buyOrders ?? []).filter((o) => o.good === g && refPrice(w, g) <= o.maxPrice);
@@ -307,7 +316,8 @@ export function operateEconomy(w: WorldState): void {
       const rest = def.p0 - baseIn;
       costIdx = (nowIn + rest) / def.p0;
     }
-    const pull = Math.pow(clamp(mk.tightness / 0.87, 0.5, 2.5), 0.7);
+    // Regulated prices are set by the government from costs: shortages and gluts don't move them
+    const pull = def.reg ? 1 : Math.pow(clamp(mk.tightness / 0.87, 0.5, 2.5), 0.7);
     const target = clamp(costIdx * pull, 0.4, worldIdx(w, g) * IMPORT_PREMIUM * 1.05);
     mk.idx = clamp(mk.idx + 0.025 * (target - mk.idx), 0.35, 4);
     if (w.day % 2 === 0) {
@@ -338,7 +348,7 @@ export function operateEconomy(w: WorldState): void {
     c.inventory = Math.max(0, p.avail) * 0.997;
     r.grossProfit = r.revenue - r.cogs;
     r.wages = c.workers * salaryOf(c) * c.salaryMult * wageIndex(w);
-    r.fixed = fixedAt(c.good, c.level) * pl;
+    r.fixed = fixedAt(c.good, c.level) * pl * (c.fixedScale ?? 1) * (isRawMine(c) ? RAW_UPKEEP : 1) + premiumPerDay(c);
     r.marketing = r.revenue * c.marketingPct;
     r.rd = r.revenue * c.rdPct;
     r.opex = r.wages + r.fixed + r.marketing + r.rd;

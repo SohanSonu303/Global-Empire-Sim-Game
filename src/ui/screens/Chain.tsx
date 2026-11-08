@@ -83,14 +83,16 @@ export function marketView(w: WorldState, g: GoodId): MarketView {
 // ---------- Layout of the flow diagram ----------
 
 const ROWS: { title: string; goods: GoodId[] }[] = [
-  { title: 'Raw materials', goods: ['crude_oil', 'silicon', 'iron_ore', 'timber', 'grain', 'cotton'] },
-  { title: 'Processed', goods: ['chemicals', 'plastics', 'electricity', 'glass', 'clothing'] },
-  { title: 'Materials & services', goods: ['freight', 'chips', 'steel', 'software', 'banking', 'food'] },
-  { title: 'Finished goods', goods: ['medicine', 'phones', 'laptops', 'cars', 'appliances', 'furniture'] },
-  { title: 'Services', goods: ['clinics', 'telecom'] },
+  { title: 'Raw: energy & metals', goods: ['crude_oil', 'natural_gas', 'silicon', 'copper', 'lithium', 'rare_earths', 'bauxite'] },
+  { title: 'Raw: land & farms', goods: ['iron_ore', 'limestone', 'timber', 'grain', 'cotton'] },
+  { title: 'Processed', goods: ['electricity', 'chemicals', 'plastics', 'water', 'glass', 'cement', 'aluminium'] },
+  { title: 'Materials & services', goods: ['steel', 'chips', 'batteries', 'freight', 'construction', 'software', 'clothing'] },
+  { title: 'Finished goods', goods: ['robots', 'cars', 'appliances', 'phones', 'laptops', 'furniture', 'food'] },
+  { title: 'Services', goods: ['ai', 'gaming', 'telecom', 'ecommerce', 'medicine', 'banking', 'real_estate'] },
+  { title: 'Health & mega businesses', goods: ['clinics', 'hospitals', 'wellness', 'airlines', 'space', 'defense'] },
 ];
 const VW = 440;
-const BW = 64;
+const BW = 56;
 const BH = 54;
 const ROW_H = 118;
 const TOP = 22;
@@ -110,7 +112,10 @@ const VH = TOP + (ROWS.length - 1) * ROW_H + BH + 8;
 
 const EDGES: { from: GoodId; to: GoodId }[] = GOOD_IDS.flatMap((to) => GOODS[to].inputs.map((i) => ({ from: i.good, to })));
 
-const SHORT: Partial<Record<GoodId, string>> = { electricity: 'Power', crude_oil: 'Crude Oil', appliances: 'Appliances', telecom: 'Mobile' };
+/** Status words short enough for the small boxes */
+const BOX_LABEL: Record<MarketStatus, string> = { shortage: 'Shortage', strong: 'Busy', balanced: 'Balanced', low: 'Quiet' };
+
+const SHORT: Partial<Record<GoodId, string>> = { electricity: 'Power', crude_oil: 'Oil', natural_gas: 'Gas', rare_earths: 'Rare Earth', appliances: 'Appliance', telecom: 'Mobile', construction: 'Builders', ecommerce: 'Online', real_estate: 'Property', ai: 'AI', space: 'Space' };
 
 // ---------- Screen ----------
 
@@ -149,7 +154,7 @@ export function ChainScreen({ good }: { good?: GoodId }) {
           {(Object.keys(STATUS) as MarketStatus[]).map((k) => (
             <span key={k} className="flex items-center gap-1.5 text-muted">
               <span className="size-2.5 rounded-sm" style={{ background: STATUS[k].color }} />
-              {STATUS[k].label} <span className="num text-dim">{counts[k] ?? 0}</span>
+              {BOX_LABEL[k] === STATUS[k].label ? STATUS[k].label : `${BOX_LABEL[k]} (${STATUS[k].label.toLowerCase()})`} <span className="num text-dim">{counts[k] ?? 0}</span>
             </span>
           ))}
           <span className="flex items-center gap-1.5 text-muted"><span className="text-text text-sm leading-none">★</span>You make it</span>
@@ -239,8 +244,8 @@ function Node({ g, v, selected, faded, onTap }: { g: GoodId; v: MarketView; sele
     >
       <rect width={BW} height={BH} rx={8} fill="var(--color-card-2)" stroke={selected ? 'var(--color-text)' : st.color} strokeWidth={selected ? 2.5 : 1.5} />
       <rect width={BW} height={5} rx={2} fill={st.color} />
-      <text x={BW / 2} y={20} textAnchor="middle" fontSize="10.5" fontWeight="700" fill="var(--color-text)">{name}</text>
-      <text x={BW / 2} y={33} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={st.color}>{st.label}</text>
+      <text x={BW / 2} y={20} textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--color-text)">{name}</text>
+      <text x={BW / 2} y={33} textAnchor="middle" fontSize="8.5" fontWeight="600" fill={st.color}>{BOX_LABEL[v.status]}</text>
       <text x={BW / 2} y={46} textAnchor="middle" fontSize="8.5" fill={pct > 0 ? 'var(--color-green)' : pct < 0 ? 'var(--color-red)' : 'var(--color-dim)'}>
         {pct > 0 ? `▲${pct}%` : pct < 0 ? `▼${-pct}%` : '→ 0%'}
       </text>

@@ -5,17 +5,20 @@ import { refPrice } from '../../engine/company';
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import { unlockLevel, unlocked, type UnlockKey } from '../../engine/rewards';
 import { tenderScore } from '../../engine/strategy';
+import { WORKING_SHARE, auctionCompany, minBid, plantValue, playerBlock, rivalValuation } from '../../engine/auctions';
 import {
   MAX_WAREHOUSE_LEVEL, buildCost, dailyCost, premiumPrice, rivalBuyers, roomFor, spaceOf, spacePer, spoilRate, storable, upgradeCostOf, usedSpace,
 } from '../../engine/warehouse';
-import type { GoodId, Job, Tender, Warehouse, WorldState } from '../../engine/types';
+import type { Auction, GoodId, Job, Tender, Warehouse, WorldState } from '../../engine/types';
 import { Badge, Button, Card, Chips, Progress, Screen, SectionTitle, cx } from '../components/core';
 import { SubHeader } from './More';
 import { Row, Slider } from './Company';
 import { GoodThumb } from '../art/plants';
 
-const TABS: { id: StrategyTab; label: string; key: UnlockKey }[] = [
+/** Tabs without a key are open from the start. */
+const TABS: { id: StrategyTab; label: string; key?: UnlockKey }[] = [
   { id: 'contracts', label: '📋 Contracts', key: 'contracts' },
+  { id: 'auctions', label: '🔨 Auctions' },
   { id: 'tenders', label: '🏛️ Tenders', key: 'tenders' },
   { id: 'warehouses', label: '🏬 Warehouses', key: 'warehouse' },
   { id: 'wars', label: '⚔️ Price wars', key: 'wars' },
@@ -31,9 +34,10 @@ export function StrategyScreen({ tab: initial }: { tab?: StrategyTab }) {
       <SubHeader title="Deals & Strategies" sub="Ways to win beyond making things" />
       <Screen>
         <div className="mt-3"><Chips items={TABS.map((x) => ({ id: x.id, label: x.label }))} value={tab} onChange={setTab} /></div>
-        {!unlocked(w, t.key) ? <Locked w={w} k={t.key} /> : (
+        {t.key && !unlocked(w, t.key) ? <Locked w={w} k={t.key} /> : (
           <div className="mt-2">
             {tab === 'contracts' && <Contracts w={w} />}
+            {tab === 'auctions' && <Auctions w={w} />}
             {tab === 'tenders' && <Tenders w={w} />}
             {tab === 'warehouses' && <Warehouses w={w} />}
             {tab === 'wars' && <Wars w={w} />}
@@ -184,6 +188,87 @@ function TenderCard({ w, t }: { w: WorldState; t: Tender }) {
           <Row label="Price per unit" value={`${fmtPrice(price)} (your cost ${fmtPrice(cost)})`} tone={price > cost ? 'good' : 'bad'} />
           <Row label="Your chance" value={rank === 1 ? 'Leading (rival bids are sealed, but this would win today)' : `About #${rank} of ${t.bids.length + 1}`} tone={rank === 1 ? 'good' : undefined} />
           <Button block size="sm" className="mt-1" onClick={() => dispatch({ type: 'bidTender', tenderId: t.id, companyId: co.id, price })}>{t.mine ? 'Change bid' : 'Send bid'}</Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ---------- auctions ----------
+
+function Auctions({ w }: { w: WorldState }) {
+  const open = w.play.auctions.filter((a) => a.status === 'open');
+  const past = w.play.auctions.filter((a) => a.status !== 'open').slice(-6).reverse();
+  return (
+    <>
+      <Intro>When a company goes bankrupt, the government clears its debts and sells it to the highest bidder. Rivals bid what it is worth to them. Your bid money is held until the auction ends and comes straight back if someone outbids you. A bid near the end adds two more days.</Intro>
+      <SectionTitle>For sale</SectionTitle>
+      {open.length === 0 && <Card className="p-3 text-sm text-muted">Nothing for sale right now. Auctions start when a company goes bankrupt: after a disaster, a price war, or a long run of losses.</Card>}
+      <div className="space-y-2">{open.map((a) => <AuctionCard key={a.id} w={w} a={a} />)}</div>
+      {past.length > 0 && <SectionTitle>Results</SectionTitle>}
+      <div className="space-y-2">
+        {past.map((a) => {
+          const c = auctionCompany(w, a);
+          const who = a.bidderId === 'player' ? 'You' : w.rivals.find((r) => r.id === a.bidderId)?.name;
+          return (
+            <Card key={a.id} className="p-3 text-sm flex items-center gap-2">
+              <span className="text-xl">{a.status === 'scrapped' ? '🗑️' : a.bidderId === 'player' ? '🏆' : '🔨'}</span>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold truncate">{c?.name ?? 'A company'}</div>
+                <div className="text-xs text-muted">{a.status === 'scrapped' ? 'No buyer: scrapped' : `${who ?? 'A buyer'} won with ${fmtMoney(a.bid)}`}</div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function AuctionCard({ w, a }: { w: WorldState; a: Auction }) {
+  const dispatch = useGame((s) => s.dispatch);
+  const c = auctionCompany(w, a);
+  const min = minBid(a);
+  const [pct, setPct] = useState(100);
+  if (!c) return null;
+  const def = GOODS[c.good];
+  const amount = Math.ceil((min * pct) / 100 / 1000) * 1000;
+  const block = playerBlock(w, a);
+  const leading = a.bidderId === 'player';
+  const leader = leading ? 'You' : a.bidderId ? w.rivals.find((r) => r.id === a.bidderId)?.name ?? 'A buyer' : null;
+  // Who is likely to bid, without giving away their limits
+  const keen = w.rivals
+    .map((r) => ({ r, v: rivalValuation(w, r, c) }))
+    .filter((x) => x.v.max >= a.reserve)
+    .sort((x, y) => y.v.max - x.v.max)
+    .slice(0, 3);
+  return (
+    <Card className="p-3">
+      <div className="flex items-start gap-3">
+        <GoodThumb good={c.good} size={44} />
+        <div className="flex-1 min-w-0">
+          <div className="font-bold truncate">{c.name}</div>
+          <div className="text-xs text-muted">{def.name} · level {c.level} · {Math.round(c.capacity).toLocaleString()} {def.unit}/day</div>
+          <div className="text-xs text-muted">Worth about {fmtMoney(plantValue(w, c))} · debts cleared · closes in {days(w, a.endDay)} day{days(w, a.endDay) === 1 ? '' : 's'}</div>
+        </div>
+        {leading && <Badge tone="good">You lead</Badge>}
+      </div>
+      <Row label={a.bid > 0 ? 'Top bid' : 'Starting price'} value={a.bid > 0 ? `${fmtMoney(a.bid)} · ${leader}` : fmtMoney(a.reserve)} tone={leading ? 'good' : undefined} />
+      <Row label="Interested" value={keen.length ? keen.map((x) => `${x.r.name.split(' ').pop()}${x.v.why[0] ? ` (${x.v.why[0]})` : ''}`).join(', ') : 'No one so far'} />
+      {a.bids.length > 0 && (
+        <div className="text-[11px] text-dim mt-1">
+          {a.bids.slice(-3).reverse().map((b, i) => (
+            <div key={i}>Day {b.day}: {b.bidderId === 'player' ? 'You' : w.rivals.find((r) => r.id === b.bidderId)?.name ?? 'A buyer'} bid {fmtMoney(b.amount)}</div>
+          ))}
+        </div>
+      )}
+      {block ? <div className="text-xs text-amber mt-2">{block}</div> : leading ? (
+        <div className="text-xs text-muted mt-2">{fmtMoney(a.bid)} of your money is held. If you win, {fmtMoney(a.bid * WORKING_SHARE)} of it stays in the company as working cash.</div>
+      ) : (
+        <>
+          <Slider label="Your bid (% of the lowest bid)" value={pct} min={100} max={250} step={5} suffix="%" onCommit={setPct} />
+          <Row label="You bid" value={`${fmtMoney(amount)}${w.player.cash < amount ? ' · not enough cash' : ''}`} tone={w.player.cash < amount ? 'bad' : undefined} />
+          <Button block size="sm" className="mt-1" disabled={w.player.cash < amount} onClick={() => dispatch({ type: 'bidAuction', auctionId: a.id, amount })}>🔨 Bid {fmtMoney(amount)}</Button>
         </>
       )}
     </Card>

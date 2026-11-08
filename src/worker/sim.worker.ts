@@ -33,7 +33,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
   const msg = ev.data;
   switch (msg.type) {
     case 'new':
-      world = createWorld(msg.seed, msg.scenario);
+      world = createWorld(msg.seed, msg.scenario, msg.setup);
       publish();
       schedule();
       break;

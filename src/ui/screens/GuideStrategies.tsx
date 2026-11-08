@@ -14,9 +14,27 @@ interface Feature {
 
 const REWARDS: Feature[] = [
   {
+    icon: '🚀', name: 'Startup story',
+    see: 'Before the main game: pick an idea (chip design, gaming, renewable energy, freelance or AI), pass a strict technical pitch, then run the company week by week toward $500K by week 64.',
+    how: [
+      'Each investor only backs certain ideas. They ask 5 questions: 2 on finance math (margins, break-even, payback, interest) and 3 technical ones about your idea. One wrong answer and there is no deal; you see the right answers, and a retry brings new questions.',
+      'Every week you set the price, marketing and R&D spend, hire or let people go, borrow or repay, and turn side work on or off. The same levers drive the companies in the main game.',
+      'Value = cash − loans + a year of profit × a multiple + a year of sales × a smaller multiple + the product. Profit and sales use the last 12 weeks, so one lucky week does not count for much.',
+      'Every 4 weeks the investor checks the value against a rising target and their own rule (be profitable, keep growing, or keep 8 weeks of cash). Pass both: trust +10. Each miss: −15. At 0 you are fired.',
+      'Run out of cash: the bank lends up to its limit, then the investor rescues you once (payout drops to $300K). At $500K the investor buys you out for $400K and you buy your first company.',
+    ],
+    todo: 'Read the weekly results: sell out means raise the price or hire, an idle team means market more or let someone go, and a loss means cut costs before the review.',
+  },
+  {
+    icon: '🧬', name: 'Career traits',
+    see: 'Two traits you pick when a game starts. Their payouts show on each monthly report under "Your traits this month".',
+    how: ['💼 Finance: +5% of monthly profit from companies that do not make raw materials.', '📈 Stock market: +7% of net trading gains a month, 5% of net losses back (shares held 7+ days).', '⛏️ Raw materials: +8% of the profit raw companies make selling outside, and raw inputs 5% cheaper.', '🤝 Deal-making: +5% on finished contracts and tenders, +10% of company-sale gains, +10% on dividends.', '🏭 Operations: upgrades and new companies 10% cheaper, workers make 5% more.', 'Each trait pays on a different kind of income, so two traits never pay on the same money. From level 10 you can swap one trait once for $1M (More screen).'],
+    todo: 'Pick traits that match your plan: a supply chain likes Raw materials + Finance, fast growth likes Operations.',
+  },
+  {
     icon: '💸', name: 'Money pops',
     see: 'A green "+$12K" floats up over a building on the city map when that company has a big sales day. A gold one with a ★ marks a new record. A coin sound plays.',
-    how: ['A pop shows when a company sells 25% more than its usual day.', 'Records beat the old best by at least 10%.', 'Turn sound on or off in More → Sound effects.'],
+    how: ['A pop shows when a company sells 25% more than its usual day.', 'Records beat the old best by at least 25%.', 'Turn sound on or off in More → Sound effects.'],
     todo: 'Keep the Home screen open at 2x or 5x and watch your city earn.',
   },
   {
@@ -53,6 +71,91 @@ const REWARDS: Feature[] = [
 
 const STRATEGIES: Feature[] = [
   {
+    icon: '🔨', name: 'Bankruptcy auctions',
+    see: 'Deals & Strategies → Auctions lists bankrupt companies for sale with the top bid, who leads, who else is interested and the days left. A gold banner tells you when a new one opens.',
+    how: [
+      'When a company goes bust (no cash for 45 days, a long run of losses in a crowded market, or an uninsured plant wrecked by a disaster), the government clears its debts and sells it over 14 days.',
+      'Bids start at half of what the plant is worth (its book value, capped at about 0.6x a year of sales). Rivals bid what it is worth to them: more if it is in their industry, feeds or buys from companies they own, or lifts their market share. Tycoons bid hardest.',
+      'Your bid money is held until the end and comes back at once if you are outbid. A bid in the last 2 days adds 2 more days, so you can always answer.',
+      'Regulators block a buyer (you too) who already sells that product from passing 40% of the market. You cannot buy back a company you took bankrupt.',
+      'Win and the company is yours with no debts, its staff rehired and its licence included. 20% of your bid stays in it as working cash. If nobody bids, the price drops 40% for 10 more days, then the plant is scrapped.',
+    ],
+    todo: 'Watch for plants in markets you know, or that feed your own companies. A cheap plant with no debts can pay back far faster than building new.',
+  },
+  {
+    icon: '🌋', name: 'Natural disasters & insurance',
+    see: 'A red banner and news such as "🌀 Hurricane batters the coast: 9 companies are damaged". Hit companies show the damage and a repair bill.',
+    how: [
+      'About one disaster every two to three years, with no warning: earthquakes (any industry), floods and wildfires (farms, forests, power, freight, shops), hurricanes (oil, power, plastics, chemicals, freight), droughts (crops and power), pandemics (everyone; medicine and clinics boom, shops and cars slump) and solar storms (power, chips, networks, banking).',
+      'Each one hits most companies in those industries: output drops for weeks or months, and there is a repair bill of a few % of the plant\'s value. Shortages push prices up for whoever is still running.',
+      'Insurance (Company → Operations) costs 1.2% of the plant\'s value a year and pays 80% of repair bills from disasters and fires.',
+      'Uninsured rival plants that are badly hit can go bankrupt, and then they come up at auction.',
+    ],
+    todo: 'Insure your big plants. Keep some cash spare so a disaster bill does not push a company into loans.',
+  },
+  {
+    icon: '⛏️', name: 'Raw materials: reserves',
+    see: 'Raw companies (iron ore, grain, cotton, silicon, timber, crude oil) show "Reserves left" on Company → Operations, with an Explore button.',
+    how: [
+      'Raw producers need no inputs, so they cost more: a dearer plant, a $2M resources licence or a $1.5M energy licence (your first licence is free), and 15% more upkeep.',
+      'Every unit uses up the reserve. A full plant runs dry in about 4 years. Below 50% each unit costs more to extract (up to double); below 25% output falls.',
+      'Exploring brings the reserve back to 100%. It costs more the emptier the reserve is. Auto-explore (on by default) pays below 30%, borrowing or using your cash if needed.',
+    ],
+    todo: 'Explore before reserves hit 50% when cash allows. A raw plant pays back in about 10 months, against 5–6 for most products, but it feeds your whole chain.',
+  },
+  {
+    icon: '🚀', name: 'Mega businesses & permits',
+    see: 'Space launches, defense, airlines, robots, hospitals and wellness carry a "Permit" badge in the Planner.',
+    how: [
+      'On top of the industry licence, the government charges a one-off permit: robots $250M, wellness $300M, airlines $400M, defense $500M, space $750M, hospitals $1B.',
+      'The plants are huge too ($13M to $66M to found) and every upgrade costs far more than in other businesses. In return the markets are big, and few rivals can afford to enter.',
+      'Buying a company in one of these markets, or winning one at auction, brings its permit with it.',
+      'Tycoons start mega businesses when a market runs short, and they pay the permit too.',
+    ],
+    todo: 'Save up, bring in a partner, or buy an existing plant at auction. Your permit lasts for good, so later plants only cost the plant.',
+  },
+  {
+    icon: '🏥', name: 'Regulated healthcare',
+    see: 'Hospitals and wellness show a "Regulated" badge. The price slider stops at the market price.',
+    how: [
+      'The government caps the price: you cannot charge more than the market price, and shortages do not push it up. Rising costs still pass through.',
+      'Margins are thin, about 5-8% for a small plant, a little more as you grow, because fixed costs fall as a share of sales.',
+      'Demand hardly moves with the economy or with price. Hospitals are the biggest market in Astoria, and pandemics fill them.',
+    ],
+    todo: 'A safe, steady earner once you are big. Pay for it with partners, then grow it level by level.',
+  },
+  {
+    icon: '🤝', name: 'Founding with partners',
+    see: 'Planner → any project over $5M (mega businesses, banks) → "Bring in a partner".',
+    how: [
+      'A partner pays the same share of the founding bill (plant plus permit) as the share of the company they get, up to 49%, so you keep control.',
+      'Rivals who know the industry and tycoons go up to 49%; other rivals and the Astoria Growth Fund up to 30%. They need the cash, and will not work with you if they dislike you.',
+      'Partners get their share of the dividends and of the price if you sell. You can buy them out later from Financials.',
+    ],
+    todo: 'Use partners to get into a $1B hospital years earlier. Rivals like you more after co-founding.',
+  },
+  {
+    icon: '🔗', name: 'New supply chains',
+    see: 'The Supply chain map now has 46 markets in 7 rows.',
+    how: [
+      'New raw materials: copper, lithium, bauxite, rare earths, limestone and natural gas.',
+      'They feed aluminium, batteries, cement, water and construction, which feed robots, AI, real estate, hospitals, rockets and more.',
+      'Old products use them too: power and plastics burn gas, chips need copper and rare earths, phones, laptops and cars need batteries, car plants and online stores buy robots, banks use AI.',
+    ],
+    todo: 'A shortage of one raw material now ripples far. Owning the base of a chain (gas, copper, lithium) feeds many industries.',
+  },
+  {
+    icon: '🎩', name: 'Tycoons',
+    see: 'Eight hands-on tycoons in People & Rivals with a Tycoon badge: Moln Eusk, Mas Saltman, Gill Bates, Hukesh Mambani, Jeff Bozes, Zark Muckerberg, Hensen Juang and Barren Wuffett.',
+    how: [
+      'Each runs businesses across several industries and starts new companies in short, growing markets, usually grabbing about 8% of that market.',
+      'They bid at bankruptcy auctions and trade shares like the other rivals.',
+      'They may offer to buy 15–20% of your fast-growing private companies above the fair price: accept, ask for 25% more (they may walk) or decline.',
+      'Their profile shows the companies they founded or bought, how much those earn, and how they play.',
+    ],
+    todo: 'Take a tycoon\'s money when you need cash to grow; turn it down when you want all the profit. Expect them in any market that runs short.',
+  },
+  {
     icon: '📋', name: 'Contracts board', unlock: 'contracts',
     see: 'Deals & Strategies → Contracts lists 3–4 offers, e.g. "Halcyon Motors wants 5,000 steel within 60 days: $820K, bonus $82K if early, penalty $164K if missed."',
     how: ['Offers come from rival companies short of a material and from the government.', 'Pay is 15–30% above the market price.', 'Each day deliveries come out of your stock before normal sales, then from your warehouses.', 'Finish within 75% of the time for the bonus. Done: XP and a better relationship. Missed: penalty and an angry rival.'],
@@ -85,7 +188,7 @@ const STRATEGIES: Feature[] = [
   {
     icon: '👑', name: 'Monopoly bonus',
     see: 'A note on the company Overview when you pass 40% of a market, and a warning bar in Price wars.',
-    how: ['Above 40% share, buyers switch away half as easily when you raise prices.', 'Each month there is a chance of an antitrust investigation, rising with your share.', 'You choose: fight in court (fee, 50% chance, lose = double fine), sell 25% of the plant, or pay a fine of 5% of a year\'s revenue.'],
+    how: ['Above 40% share, buyers switch away half as easily when you raise prices.', 'Each month there is a chance of an antitrust investigation, rising with your share.', 'You choose: pay a fine of 20% of a year\'s profit (never more than half of it), fight in court (45% chance, better with a strong brand; lose = 1.5x the fine), or sell 25% of the plant (capacity and fixed costs both drop 25%).', 'Auto-upgrade stops above 40% share: there are no buyers left to grow into. If a plant is far bigger than its sales, close a production line in its Automation tab.'],
     todo: 'Raise prices a little when you dominate, but not so much that you invite the regulators.',
   },
   {

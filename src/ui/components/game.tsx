@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SPEED_MS } from '../../worker/protocol';
 import type { Speed } from '../../worker/protocol';
-import { fmtMoney, fmtPct } from '../../engine/news';
+import { fmtCompact, fmtMoney, fmtPct } from '../../engine/news';
 import type { Explanation } from '../../engine/types';
 import { netWorthExplain } from '../../engine/progress';
 import { xpForLevel } from '../../engine/data';
@@ -74,13 +74,15 @@ export function TopBar() {
             <span className="block h-full bg-gold" style={{ width: `${Math.min(100, (p.xp / need) * 100)}%` }} />
           </span>
         </div>
-        <Num explain={() => netWorthExplain(useGame.getState().world!)} className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-card border border-line no-underline min-w-0">
+        <Num explain={() => netWorthExplain(useGame.getState().world!)} className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-card border border-line no-underline shrink-0">
           <IconCash size={18} className="text-green shrink-0" />
-          <span className="text-sm font-bold truncate">{fmtMoney(p.cash)}</span>
+          <span className="num text-sm font-bold whitespace-nowrap" title={fmtMoney(p.cash)}>{fmtCompact(p.cash)}</span>
         </Num>
-        <div className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-card border border-line" title={`Year ${year}`}>
-          <IconCalendar size={16} className="text-muted" />
-          <span className="num text-sm font-bold whitespace-nowrap">Day {world.day}</span>
+        <div className="flex items-center gap-1 h-8 px-2 rounded-lg bg-card border border-line min-w-0" title={`Day ${world.day} · Year ${year}`}>
+          <IconCalendar size={16} className="text-muted shrink-0" />
+          <span className="num text-sm font-bold whitespace-nowrap">
+            <span className="max-[359px]:hidden">Day </span>{world.day.toLocaleString('en-US')}
+          </span>
         </div>
         <button
           aria-label="How to play"

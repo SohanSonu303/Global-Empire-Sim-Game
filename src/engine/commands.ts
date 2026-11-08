@@ -1,10 +1,11 @@
-import { GOODS, INDUSTRIES, MAX_LEVEL, requiredCapital, startCost } from './data';
-import { buyLicence, grantLicence, hasLicence, licenceFee, licences } from './licences';
-import { applyUpgrade, clamp, drawCredit, nextUpgradeCost, salaryOf, wageIndex } from './company';
+import { GOODS, INDUSTRIES, LEVEL_CAP_MULT, MAX_LEVEL, UPGRADE_COST_GROWTH, maxPriceMult, requiredCapital, startCost, upgradeCost } from './data';
+import { foundPrice, noteOpsSaved, swapTrait } from './traits';
+import { buyLicence, grantLicence, grantPermit, hasLicence, licenceFee, licences, permitFee } from './licences';
+import { applyUpgrade, clamp, drawCredit, nextUpgradeCost, salaryOf, wageIndex, workersNeeded } from './company';
 import { cancelContract, offerContract } from './contracts';
 import { resolveEvent } from './events';
 import { MAX_RATE_MULT, MIN_RATE_MULT, ensureBanks, isBank, willLend } from './banks';
-import { bidCompany, buyBackStake, buyStake, outsidePct, sellCompany, sellStake } from './ownership';
+import { addFoundingPartner, bidCompany, buyBackStake, buyStake, foundingPartners, outsidePct, sellCompany, sellStake } from './ownership';
 import { maxFillToday, stockByTicker, tryFill } from './market';
 import { addNews, fmtMoney } from './news';
 import { addXp, claimGoal, netWorth } from './progress';
@@ -12,6 +13,9 @@ import { checkIn } from './rewards';
 import { acceptJob, bidTender, endWar, startCampaign } from './strategy';
 import { buildWarehouse, releaseStock, setBuyOrder, setLimit, setSellRule, sellToRivals, upgradeWarehouse } from './warehouse';
 import { newCompany, seedInputs } from './world';
+import { COVER, premiumPerDay } from './disasters';
+import { explore } from './resources';
+import { bidAuction } from './auctions';
 import type { Command, CommandResult, Company, Order, WorldState } from './types';
 
 const ok = (message: string): CommandResult => ({ ok: true, message });
@@ -32,10 +36,27 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       if (w.companies.some((c) => c.name.toLowerCase() === name.toLowerCase())) return fail('That name is taken');
       const ind = def.industry;
       if (!hasLicence(w, ind) && licences(w).length > 0) return fail(`You need a ${INDUSTRIES[ind].name} licence first (${fmtMoney(licenceFee(w, ind))})`);
-      const price = startCost(cmd.good);
-      if (w.player.cash < price) return fail(`Founding costs ${fmtMoney(price)}`);
+      const full = startCost(cmd.good);
+      const price = foundPrice(w, cmd.good);
+      const permit = permitFee(w, cmd.good);
+      const total = price + permit;
+      let partner: { id: string; pct: number; paid: number } | null = null;
+      if (cmd.partnerId && cmd.partnerPct && cmd.partnerPct > 0) {
+        const pct = clamp(Math.round(cmd.partnerPct * 100) / 100, 0.05, 0.49);
+        const o = foundingPartners(w, cmd.good, total, pct).find((x) => x.id === cmd.partnerId);
+        if (!o) return fail('Unknown partner');
+        if (!o.ok) return fail(`${o.name}: ${o.why}`);
+        partner = { id: o.id, pct, paid: Math.round(total * pct) };
+      }
+      const mine = total - (partner?.paid ?? 0);
+      if (w.player.cash < mine) return fail(`Founding costs ${fmtMoney(total)}${permit ? ` with the ${fmtMoney(permit)} permit` : ''}${partner ? `; your part is ${fmtMoney(mine)}` : ''}`);
+      noteOpsSaved(w, full - price);
       grantLicence(w, ind); // your first industry's licence is free
-      w.player.cash -= price;
+      w.player.cash -= mine;
+      if (permit > 0) {
+        grantPermit(w, cmd.good);
+        w.macro.govDebt = Math.max(0, w.macro.govDebt - permit);
+      }
       w.seq += 1;
       const c = newCompany(w, { id: `p${w.seq}`, name, good: cmd.good, ownerId: 'player', isPlayer: true, ticker: null, level: 1 });
       const plant = price - requiredCapital(cmd.good);
@@ -44,13 +65,30 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       const capital = requiredCapital(cmd.good);
       if (capital > 0) { c.cash += capital; c.lockedCapital = capital; }
       seedInputs(w, c, 2); // a starter delivery of inputs comes with the plant
-      if (cmd.priceMult) c.priceMult = Math.max(0.5, Math.min(2, cmd.priceMult));
+      if (cmd.priceMult) c.priceMult = Math.max(0.5, Math.min(maxPriceMult(cmd.good), cmd.priceMult));
+      if (partner) addFoundingPartner(w, c, partner.id, partner.pct, partner.paid);
       w.companies.push(c);
       w.macro.capexMonth += plant * 0.65;
       ensureBanks(w);
-      addNews(w, 'player', `${name} opens its doors`, `A new ${def.name.toLowerCase()} producer enters the Astoria market.`, 'good', [c.id]);
+      addNews(w, 'player', `${name} opens its doors`, `A new ${def.name.toLowerCase()} producer enters the Astoria market.${permit ? ` The government permit cost ${fmtMoney(permit)}.` : ''}${partner ? ` ${c.partners?.[0]?.name} put in ${fmtMoney(partner.paid)} for ${Math.round(partner.pct * 100)}%.` : ''}`, 'good', [c.id]);
       return ok(`${name} founded`);
     }
+    case 'downsize': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      if (c.level <= 1) return fail('Already the smallest plant');
+      const back = upgradeCost(c.good, c.level, UPGRADE_COST_GROWTH) * 0.15;
+      c.level -= 1;
+      c.capacity /= LEVEL_CAP_MULT;
+      c.assets = Math.max(0, c.assets / LEVEL_CAP_MULT);
+      c.workers = Math.min(c.workers, workersNeeded(c));
+      c.automation = { ...c.automation, autoUpgrade: false };
+      c.cash += back;
+      addNews(w, 'player', `${c.name} closes a production line`, `Back to level ${c.level}: lower fixed costs for a plant that fits its market.`, 'neutral', [c.id]);
+      return ok(`${c.name} is now level ${c.level}. Fixed costs drop about 31%. Sold equipment for ${fmtMoney(back)}`);
+    }
+    case 'swapTrait':
+      return swapTrait(w, cmd.from, cmd.to);
     case 'upgrade': {
       const c = myCompany(w, cmd.companyId);
       if (!c) return fail('Company not found');
@@ -61,6 +99,7 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       if (fromPlayer > w.player.cash) return fail(`Need ${fmtMoney(cost)} (company + personal cash)`);
       c.cash -= fromCompany;
       w.player.cash -= fromPlayer;
+      if (c.ops) noteOpsSaved(w, cost / 0.9 - cost);
       applyUpgrade(w, c);
       return ok(`${c.name} upgraded to level ${c.level}${fromPlayer > 0 ? ` (${fmtMoney(fromPlayer)} from you)` : ''}`);
     }
@@ -85,9 +124,9 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
     case 'setPrice': {
       const c = myCompany(w, cmd.companyId);
       if (!c) return fail('Company not found');
-      c.priceMult = clamp(cmd.priceMult, 0.5, 2);
+      c.priceMult = clamp(cmd.priceMult, 0.5, maxPriceMult(c.good));
       c.priceSetDay = w.day;
-      return ok('Price updated');
+      return ok(GOODS[c.good].reg && cmd.priceMult > c.priceMult ? 'Regulated: you cannot charge more than the market price' : 'Price updated');
     }
     case 'setSalary': {
       const c = myCompany(w, cmd.companyId);
@@ -267,6 +306,19 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       return bidTender(w, cmd.tenderId, cmd.companyId, cmd.price);
     case 'endWar':
       return endWar(w, cmd.warId);
+    case 'setInsurance': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      c.insured = cmd.on;
+      return ok(cmd.on ? `${c.name} is insured: ${fmtMoney(premiumPerDay(c) * 365)} a year, pays ${Math.round(COVER * 100)}% of disaster and fire repairs` : `${c.name} is no longer insured`);
+    }
+    case 'explore': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      return explore(w, c);
+    }
+    case 'bidAuction':
+      return bidAuction(w, cmd.auctionId, cmd.amount);
     case 'seenAchievement': {
       const a = w.achievements.find((x) => x.id === cmd.id);
       if (a) a.seen = true;

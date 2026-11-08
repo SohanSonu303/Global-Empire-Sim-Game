@@ -1,11 +1,17 @@
 import { normal } from './rng';
 import { clamp } from './company';
 import { INDUSTRY_IDS } from './data';
+import { noteDividend, noteStockSale } from './traits';
 import type { Company, Explanation, Holding, IndustryId, Order, Stock, WorldState } from './types';
 
 export const SPREAD = 0.002; // full bid-ask spread
 export const MAX_DAILY_ADV_FRACTION = 0.1; // one owner can trade at most 10% of ADV per day per order
 export const EQUITY_PREMIUM = 0.055;
+/** Normal daily trading volume stays between 0.1% and 1% of all shares (it starts at 0.3%). */
+export const ADV_MIN = 0.001;
+export const ADV_MAX = 0.01;
+/** On load, a rival never keeps more cash than this share of yearly GDP (repairs saves hit by the share bug). */
+const RIVAL_CASH_CAP = 0.01;
 
 export function companyOf(w: WorldState, s: Stock): Company {
   return w.companies.find((c) => c.id === s.companyId)!;
@@ -90,7 +96,7 @@ export function updatePrices(w: WorldState): void {
     s.halted = Math.abs(R) >= 0.1;
     s.price = Math.max(0.01, s.price * (1 + R));
     s.volume = s.adv * (0.7 + Math.abs(R) * 25 + Math.abs(s.pressure) * 3) * Math.exp(0.25 * normal(w.rng));
-    s.adv = s.adv * 0.97 + s.volume * 0.03;
+    s.adv = clamp(s.adv * 0.97 + s.volume * 0.03, s.shares * ADV_MIN, s.shares * ADV_MAX);
     s.sentiment = clamp(s.sentiment * 0.9 + 4 * R, -1, 1);
     s.newsImpact *= 0.4;
     s.pressure = 0;
@@ -120,6 +126,42 @@ function pushHist(w: WorldState, s: Stock): void {
 }
 
 // ---------- ownership helpers ----------
+
+/** Shares of this stock held by you and the rivals together. */
+export function sharesHeld(w: WorldState, ticker: string): number {
+  let n = w.player.holdings[ticker]?.shares ?? 0;
+  for (const r of w.rivals) n += r.holdings[ticker]?.shares ?? 0;
+  return n;
+}
+
+/** Shares still in public hands, the only ones a buyer can get on the exchange. */
+export function floatLeft(w: WorldState, s: Stock): number {
+  return Math.max(0, s.shares - sharesHeld(w, s.ticker));
+}
+
+/**
+ * Repairs saves made before trading was limited to real shares: rival holdings above the shares
+ * that exist are scaled back, runaway volume is reset and rival cash is capped.
+ */
+export function repairMarket(w: WorldState): void {
+  for (const s of w.stocks) {
+    s.adv = clamp(Number.isFinite(s.adv) ? s.adv : 0, s.shares * ADV_MIN, s.shares * ADV_MAX);
+    const mine = w.player.holdings[s.ticker]?.shares ?? 0;
+    const theirs = sharesHeld(w, s.ticker) - mine;
+    const room = Math.max(0, s.shares * 0.98 - mine);
+    if (theirs > room && theirs > 0) {
+      const k = room / theirs;
+      for (const r of w.rivals) {
+        const h = r.holdings[s.ticker];
+        if (!h) continue;
+        h.shares *= k;
+        if (h.shares < 1) delete r.holdings[s.ticker];
+      }
+    }
+  }
+  const cap = Math.max(5e9, (w.macro.gdp || 0) * RIVAL_CASH_CAP);
+  for (const r of w.rivals) if (!Number.isFinite(r.cash) || r.cash > cap) r.cash = cap;
+}
 
 export function holdingsOf(w: WorldState, ownerId: string): Record<string, Holding> {
   if (ownerId === 'player') return w.player.holdings;
@@ -160,6 +202,7 @@ export function tryFill(w: WorldState, o: Order): number {
   if (qty <= 0) return 0;
   const holdings = holdingsOf(w, o.ownerId);
   if (o.side === 'sell') qty = Math.min(qty, Math.floor(holdings[o.ticker]?.shares ?? 0));
+  else qty = Math.min(qty, Math.floor(floatLeft(w, s))); // you cannot buy shares nobody is selling
   let px = executionPrice(s, o.side, qty);
   if (o.type === 'limit' && o.limit != null) {
     if (o.side === 'buy' && px > o.limit) return 0;
@@ -179,10 +222,14 @@ export function tryFill(w: WorldState, o: Order): number {
   if (o.side === 'buy') {
     h.avgCost = (h.avgCost * h.shares + value) / (h.shares + qty);
     h.shares += qty;
+    if (o.ownerId === 'player') h.since = w.day;
     addCash(w, o.ownerId, -value);
     s.pressure += qty / s.adv;
   } else {
-    if (o.ownerId === 'player') w.player.realizedPnl += (px - h.avgCost) * qty;
+    if (o.ownerId === 'player') {
+      w.player.realizedPnl += (px - h.avgCost) * qty;
+      noteStockSale(w, (px - h.avgCost) * qty, w.day - (h.since ?? -999));
+    }
     h.shares -= qty;
     addCash(w, o.ownerId, value);
     s.pressure -= qty / s.adv;
@@ -211,7 +258,7 @@ export function payDividends(w: WorldState): void {
     for (const p of c.partners) {
       const part = c.qAcc.net * 0.3 * p.pct;
       c.cash -= part;
-      if (p.ownerId === 'player') { w.player.cash += part; w.player.dividendsReceived += part; }
+      if (p.ownerId === 'player') { w.player.cash += part; w.player.dividendsReceived += part; noteDividend(w, part); }
       else { const r = w.rivals.find((x) => x.id === p.ownerId); if (r) r.cash += part; }
     }
   }
@@ -226,6 +273,7 @@ export function payDividends(w: WorldState): void {
     if (ph) {
       w.player.cash += ph.shares * perShare;
       w.player.dividendsReceived += ph.shares * perShare;
+      noteDividend(w, ph.shares * perShare);
     }
     for (const r of w.rivals) {
       const h = r.holdings[s.ticker];

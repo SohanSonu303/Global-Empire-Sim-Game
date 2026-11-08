@@ -7,9 +7,11 @@
 import { clamp, companyValue } from './company';
 import { remember } from './contracts';
 import { stockByTicker } from './market';
-import { grantLicence } from './licences';
+import { grantLicence, grantPermit } from './licences';
+import { noteCompanySale } from './traits';
 import { addNews, fmtMoney, fmtPct } from './news';
-import type { CommandResult, Company, Partner, Rival, WorldState } from './types';
+import { GOODS, INDUSTRIES } from './data';
+import type { CommandResult, Company, GoodId, Partner, Rival, WorldState } from './types';
 
 /** Outside partners may own at most this much of your company, so you keep control. */
 export const MAX_OUTSIDE = 0.49;
@@ -115,6 +117,46 @@ export function sellStake(w: WorldState, c: Company, pct: number, buyerId: strin
   if (rv) remember(rv, w, 4, `Bought ${fmtPct(pct, 0)} of ${c.name}.`);
   addNews(w, 'player', `${offer.name} buys ${fmtPct(pct, 0)} of ${c.name}`, `The investment puts ${fmtMoney(offer.price)} into the company.`, 'good', [c.id]);
   return ok(`${offer.name} put ${fmtMoney(offer.price)} into ${c.name} for ${fmtPct(pct, 0)}`);
+}
+
+// ---------- consortium founding ----------
+
+/** Companies that cost at least this much to found (with permit) can be started with a partner. */
+export const CONSORTIUM_MIN = 5_000_000;
+/** The fund backs big projects with up to this share. */
+const FUND_MAX = 0.3;
+
+export interface FoundingPartner { id: string; name: string; maxPct: number; ok: boolean; why: string }
+
+/**
+ * Who would pay part of the founding bill (plant + permit) for the same share of the company.
+ * Rivals who know the industry, and tycoons, go up to 49%; others, and the fund, less.
+ */
+export function foundingPartners(w: WorldState, good: GoodId, total: number, pct = 0.25): FoundingPartner[] {
+  const ind = GOODS[good].industry;
+  const out: FoundingPartner[] = [];
+  const big = total >= CONSORTIUM_MIN;
+  out.push({ id: FUND_ID, name: FUND_NAME, maxPct: FUND_MAX, ok: big && pct <= FUND_MAX + 1e-9, why: !big ? `Only for projects over ${fmtMoney(CONSORTIUM_MIN)}` : pct > FUND_MAX + 1e-9 ? `Takes at most ${fmtPct(FUND_MAX, 0)}` : 'Backs big projects for a steady share' });
+  for (const r of w.rivals) {
+    const knows = r.focus.includes(ind) || !!r.tycoon;
+    const maxPct = knows ? MAX_OUTSIDE : 0.3;
+    const share = total * pct;
+    const why = !big ? `Only for projects over ${fmtMoney(CONSORTIUM_MIN)}`
+      : r.relation < -10 ? 'Will not work with you'
+      : pct > maxPct + 1e-9 ? `Takes at most ${fmtPct(maxPct, 0)}`
+      : r.cash < share * 2 ? 'Cannot spare that much cash'
+      : '';
+    out.push({ id: r.id, name: r.name, maxPct, ok: !why, why: why || (knows ? `Knows ${INDUSTRIES[ind].name.toLowerCase()}` : 'Wants a foot in the door') });
+  }
+  return out.sort((a, b) => Number(b.ok) - Number(a.ok) || b.maxPct - a.maxPct);
+}
+
+/** Record a founding partner on a new company and take their money. */
+export function addFoundingPartner(w: WorldState, c: Company, partnerId: string, pct: number, paid: number): void {
+  const rv = rivalById(w, partnerId);
+  if (rv) { rv.cash -= paid; remember(rv, w, 6, `Co-founded ${c.name} with you.`); rv.relation = Math.min(100, rv.relation + 5); }
+  const name = rv?.name ?? FUND_NAME;
+  c.partners = [{ ownerId: partnerId, name, pct, paid, day: w.day }];
 }
 
 /** Buying a partner out costs their share of today's value plus 10%. */
@@ -270,6 +312,7 @@ function takeControl(w: WorldState, c: Company, how: string, grudge = -12): void
   c.isPlayer = true;
   c.ownerId = 'player';
   grantLicence(w, c.industry); // the company's licence comes with it
+  grantPermit(w, c.good);
   c.partners = partnersOf(c).filter((p) => p.ownerId !== 'player');
   if (!c.partners.length) delete c.partners;
   c.automation = { ...c.automation, dividendPct: c.ticker ? 30 : 50, minCash: Math.max(5_000, c.automation.minCash) };
@@ -386,6 +429,8 @@ export function transferCompany(w: WorldState, c: Company, buyerId: string, pric
   for (const p of partnersOf(c)) { rest -= p.pct; payTo(w, p.ownerId, price * p.pct); }
   const mine = price * Math.max(0, rest);
   w.player.cash += mine;
+  // Deal-making trait: a share of the gain over book value
+  if (c.isPlayer) noteCompanySale(w, c, mine, Math.max(0, rest) * Math.max(0, c.assets + c.cash - c.debt));
   c.isPlayer = false;
   c.ownerId = rv ? rv.id : 'public';
   delete c.partners;

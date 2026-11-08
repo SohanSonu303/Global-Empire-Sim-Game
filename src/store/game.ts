@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Command, CommandResult, Explanation, GoodId, IndustryId, ScenarioId, WorldState } from '../engine/types';
 import type { FromWorker, Speed, ToWorker } from '../worker/protocol';
+import type { GameSetup } from '../engine/startup';
 import { listSaves, loadSettings, readSave, saveSettings, writeSave } from '../persistence/saves';
 
 export type Tab = 'home' | 'business' | 'markets' | 'world' | 'more';
@@ -21,7 +22,7 @@ export type Route =
   | { screen: 'strategy'; tab?: StrategyTab }
   | { screen: 'reports' };
 
-export type StrategyTab = 'contracts' | 'tenders' | 'warehouses' | 'wars' | 'tips';
+export type StrategyTab = 'contracts' | 'auctions' | 'tenders' | 'warehouses' | 'wars' | 'tips';
 
 export type GuideSection = 'about' | 'play' | 'grow' | 'business' | 'markets' | 'deals' | 'strategies' | 'rivals';
 
@@ -38,7 +39,7 @@ interface GameStore {
   eventOpen: boolean;
 
   boot: () => Promise<void>;
-  newGame: (scenario: ScenarioId, name: string) => void;
+  newGame: (scenario: ScenarioId, name: string, setup?: GameSetup) => void;
   loadWorld: (world: WorldState, saveId: string, name: string) => void;
   setSpeed: (s: Speed) => void;
   dispatch: (cmd: Command) => Promise<CommandResult>;
@@ -123,13 +124,13 @@ export const useGame = create<GameStore>((set, get) => ({
     set({ booting: false });
   },
 
-  newGame: (scenario, name) => {
+  newGame: (scenario, name, setup) => {
     const seed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
     const id = `save-${Date.now().toString(36)}`;
     lastAutosaveDay = 0;
     set({ saveId: id, saveName: name || 'My Empire', tab: 'home', stack: [], speed: 0 });
     saveSettings({ ...loadSettings(), lastSaveId: id });
-    send({ type: 'new', seed, scenario });
+    send({ type: 'new', seed, scenario, setup });
     send({ type: 'speed', speed: 0 });
     void get().dispatch({ type: 'checkIn', date: localDate() });
     // First save happens on the first state message via autosave threshold; save explicitly too

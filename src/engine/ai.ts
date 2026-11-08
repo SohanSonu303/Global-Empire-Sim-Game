@@ -1,5 +1,5 @@
 import { next, normal } from './rng';
-import { GOODS, LEVEL_CAP_MULT } from './data';
+import { GOODS, LEVEL_CAP_MULT, maxPriceMult } from './data';
 import { applyUpgrade, canUpgrade, clamp, nextUpgradeCost, creditLimit, importPrice, refPrice } from './company';
 import { fairValue, tryFill } from './market';
 import { addNews, fmtMoney } from './news';
@@ -70,7 +70,7 @@ export function corporateAI(w: WorldState, c: Company): void {
   }
   // Pricing: never above what importers charge, never below what it costs to make
   const ref = refPrice(w, c.good);
-  const pmCap = Math.min(1.35, (importPrice(w, c.good) / ref) * 0.97);
+  const pmCap = Math.min(1.35, maxPriceMult(c.good), (importPrice(w, c.good) / ref) * 0.97);
   const unitCost = (r.cogs + r.wages + r.fixed) / Math.max(1, r.sold);
   const canRaise = c.priceMult * 1.03 < pmCap;
   const canCut = c.priceMult > 0.7 && ref * c.priceMult * 0.97 > unitCost * 1.03;

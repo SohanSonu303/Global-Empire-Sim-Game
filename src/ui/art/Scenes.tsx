@@ -377,7 +377,7 @@ export function TradingFloor({ tickers }: { tickers: { t: string; up: boolean; p
 /* ------------------------------------------------------------------ portraits */
 
 interface Look {
-  skin: string; hair: string; hairStyle: 'slick' | 'bob' | 'short' | 'bun' | 'side';
+  skin: string; hair: string; hairStyle: 'slick' | 'bob' | 'short' | 'bun' | 'side' | 'bald';
   suit: string; tie?: string; blouse?: string; beard?: boolean; glasses?: boolean; grey?: boolean;
 }
 const LOOKS: Record<string, Look> = {
@@ -386,6 +386,15 @@ const LOOKS: Record<string, Look> = {
   vale: { skin: '#c99a76', hair: '#151515', hairStyle: 'short', suit: '#262a36', tie: '#8e44ad', beard: true, glasses: true },
   okafor: { skin: '#7a4a2e', hair: '#141010', hairStyle: 'bun', suit: '#c8651e', blouse: '#f3e6cf' },
   park: { skin: '#e8c19a', hair: '#1c1a1a', hairStyle: 'side', suit: '#2a3340', tie: '#27ae60' },
+  // Tycoons (keys are fragments of their parody names)
+  eusk: { skin: '#eac0a0', hair: '#3a2c22', hairStyle: 'short', suit: '#1b1e24', blouse: '#2b2f38' },
+  saltman: { skin: '#f0cdb0', hair: '#6b4a32', hairStyle: 'short', suit: '#5f6b78', blouse: '#e8ebef' },
+  bates: { skin: '#f2cfb3', hair: '#8a7356', hairStyle: 'side', suit: '#34495e', tie: '#5d8aa8', glasses: true },
+  mambani: { skin: '#b07d58', hair: '#121212', hairStyle: 'slick', suit: '#f1ece2', tie: '#b9770e', grey: true },
+  bozes: { skin: '#e4b896', hair: '#e4b896', hairStyle: 'bald', suit: '#22303f', blouse: '#9fb6cd' },
+  muckerberg: { skin: '#f3d2b6', hair: '#5a3b26', hairStyle: 'short', suit: '#55606b', blouse: '#6c7a89' },
+  juang: { skin: '#e6c09a', hair: '#1a1a1a', hairStyle: 'slick', suit: '#0f0f10', blouse: '#1e1e20', grey: true },
+  wuffett: { skin: '#f0c7aa', hair: '#e8e8e8', hairStyle: 'side', suit: '#3a3f47', tie: '#7f1d1d', glasses: true },
 };
 function lookFor(name: string, color: string): Look {
   const key = Object.keys(LOOKS).find((k) => name.toLowerCase().includes(k));

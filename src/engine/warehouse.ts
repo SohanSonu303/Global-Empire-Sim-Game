@@ -14,7 +14,7 @@ import type { CommandResult, Company, GoodId, Warehouse, WorldState } from './ty
 export const NOT_STORABLE: GoodId[] = ['electricity', 'software', 'telecom', 'freight', 'clinics', 'banking'];
 
 /** Share lost per day in storage. */
-const SPOIL: Partial<Record<GoodId, number>> = { food: 0.004, grain: 0.002, cotton: 0.0015, medicine: 0.001, timber: 0.0008 };
+const SPOIL: Partial<Record<GoodId, number>> = { food: 0.004, grain: 0.002, cotton: 0.0015, medicine: 0.001, timber: 0.0008, water: 0.002, cement: 0.001, batteries: 0.0006 };
 const SPOIL_DEFAULT = 0.0003;
 
 export const WAREHOUSE_SPACE = 6_000; // level 1

@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useGame } from '../../store/game';
 import { GOODS, INDUSTRIES, INDUSTRY_IDS, requiredCapital, startCost, usedBy } from '../../engine/data';
 import { inputSources, launchPreview, opportunities, type Opportunity } from '../../engine/advisor';
-import { hasLicence, licenceFee, licences } from '../../engine/licences';
+import { hasLicence, licenceFee, licences, permitFee } from '../../engine/licences';
+import { CONSORTIUM_MIN, foundingPartners } from '../../engine/ownership';
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import type { GoodId, IndustryId, WorldState } from '../../engine/types';
 import { GoodThumb } from '../art/plants';
@@ -99,7 +100,8 @@ function LicenceCard({ w, filter }: { w: WorldState; filter: Filter }) {
 
 function OppRow({ o, w, onOpen }: { o: Opportunity; w: WorldState; onOpen: () => void }) {
   const def = GOODS[o.good];
-  const afford = w.player.cash >= o.foundCost + o.licence;
+  const permit = permitFee(w, o.good);
+  const afford = w.player.cash >= o.foundCost + o.licence + permit;
   const cover = o.capacity > 0 ? Math.min(1.5, o.demand / o.capacity) : 1.5;
   return (
     <Card onClick={onOpen} className="p-2.5">
@@ -112,6 +114,8 @@ function OppRow({ o, w, onOpen }: { o: Opportunity; w: WorldState; onOpen: () =>
           </div>
           <div className="flex gap-1 flex-wrap mt-1">
             {o.tags.map((t) => <Badge key={t} tone={TAG[t].tone}>{TAG[t].label}</Badge>)}
+            {permit > 0 && <Badge tone="warn">Permit {fmtMoney(permit)}</Badge>}
+            {def.reg && <Badge tone="neutral">Regulated</Badge>}
           </div>
           <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
             <Stat label="Price" value={<>{fmtPrice(o.price)} <Trend v={o.trend} /></>} />
@@ -155,10 +159,19 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
   const cost = startCost(good);
   const capital = requiredCapital(good);
   const fee = licenceFee(w, def.industry);
-  const afford = w.player.cash >= cost;
+  const permit = permitFee(w, good);
+  const total = cost + permit;
+  const [partnerId, setPartnerId] = useState<string | null>(null);
+  const [partnerPct, setPartnerPct] = useState(0.25);
+  const canPartner = total >= CONSORTIUM_MIN;
+  const partners = canPartner ? foundingPartners(w, good, total, partnerPct) : [];
+  const partner = partnerId ? partners.find((x) => x.id === partnerId) : undefined;
+  const theirs = partner?.ok ? Math.round(total * partnerPct) : 0;
+  const mine = total - theirs;
+  const afford = w.player.cash >= mine;
   const suggested = suggestName(good, w);
   const submit = async () => {
-    const r = await dispatch({ type: 'foundCompany', name: name.trim() || suggested, good, priceMult: pm });
+    const r = await dispatch({ type: 'foundCompany', name: name.trim() || suggested, good, priceMult: pm, ...(partner?.ok ? { partnerId: partner.id, partnerPct } : {}) });
     if (r.ok) onClose();
   };
   const bar = (v: number) => `${Math.max(2, (v / Math.max(p.price, p.unitCost)) * 100)}%`;
@@ -175,7 +188,7 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
           </Button>
         ) : (
           <Button block size="lg" disabled={!afford} onClick={submit}>
-            {afford ? `Found for ${fmtMoney(cost)}` : `Need ${fmtMoney(cost)} (you have ${fmtMoney(w.player.cash)})`}
+            {afford ? `Found for ${fmtMoney(mine)}${theirs ? ` (+${fmtMoney(theirs)} from partner)` : ''}` : `Need ${fmtMoney(mine)} (you have ${fmtMoney(w.player.cash)})`}
           </Button>
         )
       }
@@ -189,6 +202,43 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
       )}
       {licences(w).length === 0 && (
         <p className="text-sm text-gold mt-2">This will be your first company, so its {INDUSTRIES[def.industry].name} licence is free. Other industries will need a paid licence.</p>
+      )}
+      {permit > 0 && (
+        <p className="text-sm text-amber mt-2">
+          A mega business: on top of the industry licence, the government charges a one-off {fmtMoney(permit)} permit. Founding costs {fmtMoney(cost)} for the plant plus the permit, {fmtMoney(total)} in all. Upgrades are just as big, so many founders bring in a partner.
+        </p>
+      )}
+      {def.reg && (
+        <p className="text-sm text-muted mt-2">
+          Regulated: you can't charge more than the market price, and shortages don't push the price up. Margins are thin (about 5-8%), but people need care in good times and bad, so income is steady. Bigger plants earn better margins.
+        </p>
+      )}
+      {canPartner && fee === 0 && (
+        <Section title="Bring in a partner">
+          <p className="text-xs text-muted">A partner pays part of the {fmtMoney(total)} bill and owns the same share of the company. They get that share of its dividends, and you keep control.</p>
+          <div className="flex gap-1.5 flex-wrap mt-2">
+            <button className={cx('px-2.5 min-h-[36px] rounded-lg border text-xs font-semibold', !partnerId ? 'border-gold text-gold' : 'border-line text-muted')} onClick={() => setPartnerId(null)}>No partner</button>
+            {partners.map((x) => (
+              <button key={x.id} disabled={!x.ok && x.maxPct < partnerPct - 1e-9 ? false : !x.ok} className={cx('px-2.5 min-h-[36px] rounded-lg border text-xs font-semibold text-left disabled:opacity-40', partnerId === x.id ? 'border-gold text-gold' : 'border-line text-muted')} onClick={() => { setPartnerId(x.id); if (partnerPct > x.maxPct) setPartnerPct(x.maxPct); }}>
+                {x.name}<span className="block font-normal text-dim">{x.ok ? `${x.why} · up to ${fmtPct(x.maxPct, 0)}` : x.why}</span>
+              </button>
+            ))}
+          </div>
+          {partnerId && (
+            <>
+              <div className="flex items-center justify-between text-sm mt-2">
+                <span className="text-muted">Their share</span>
+                <span className="num font-bold">{fmtPct(partnerPct, 0)}</span>
+              </div>
+              <input type="range" min={0.05} max={partner?.maxPct ?? 0.49} step={0.01} value={partnerPct} onChange={(e) => setPartnerPct(Number(e.target.value))} className="w-full h-tap accent-[var(--color-gold)]" aria-label="Partner share" />
+              <div className="grid grid-cols-2 gap-2">
+                <Forecast label="They pay" value={fmtMoney(theirs)} />
+                <Forecast label="You pay" value={fmtMoney(mine)} tone={afford ? 'good' : 'bad'} />
+              </div>
+              {partner && !partner.ok && <p className="text-xs text-red mt-1">{partner.name}: {partner.why}</p>}
+            </>
+          )}
+        </Section>
       )}
       {capital > 0 && (
         <p className="text-sm text-amber mt-2">
@@ -232,7 +282,7 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
           <span className="text-muted">{pm < 0.99 ? 'Cheaper than the market' : pm > 1.01 ? 'Above the market' : 'Market price'}</span>
           <span className="num font-bold">{Math.round(pm * 100)}%</span>
         </div>
-        <input type="range" min={0.8} max={1.3} step={0.01} value={pm} onChange={(e) => setPm(Number(e.target.value))} className="w-full h-tap accent-[var(--color-gold)]" aria-label="Launch price" />
+        <input type="range" min={0.8} max={def.reg ? 1 : 1.3} step={0.01} value={pm} onChange={(e) => setPm(Number(e.target.value))} className="w-full h-tap accent-[var(--color-gold)]" aria-label="Launch price" />
         <div className="grid grid-cols-2 gap-2">
           <Forecast label="Sales / day" value={`${Math.round(p.soldPerDay).toLocaleString()} of ${Math.round(p.capacity).toLocaleString()}`} />
           <Forecast label="Profit / day" value={fmtMoney(p.profitDay)} tone={p.profitDay > 0 ? 'good' : 'bad'} />
@@ -295,6 +345,13 @@ const NAMES: Partial<Record<GoodId, string[]>> = {
   timber: ['Greenbough Timber', 'Pinecrest Logging'], chemicals: ['Catalyst Chemicals', 'Bluebeaker Chem'], glass: ['Crystalline Glass', 'Brightpane'],
   freight: ['Roadrunner Freight', 'Harborline Logistics'], furniture: ['Oak & Ember', 'Homestead Furnishings'], laptops: ['Foldtop', 'Keystroke Computers'],
   medicine: ['Willow Pharma', 'Clearleaf Labs'], telecom: ['Signalwave', 'Brightlink Mobile'], clinics: ['Riverside Clinics', 'Kindred Care'],
+  copper: ['Copperline Mining', 'Red Vein Metals'], lithium: ['Brightsalt Lithium', 'Highflat Minerals'], bauxite: ['Redearth Bauxite', 'Claymont Ore'],
+  rare_earths: ['Magnetite Rare Metals', 'Starstone Elements'], limestone: ['Chalkridge Quarry', 'Greystone Aggregates'], natural_gas: ['Bluefire Gas', 'Northfield Energy'],
+  aluminium: ['Featherweight Metals', 'Silverline Aluminium'], batteries: ['Sparkcell', 'Longcharge Batteries'], cement: ['Solidrock Cement', 'Cornerstone Materials'],
+  water: ['Purewell Water', 'Silver Spring Utilities'], construction: ['Tallframe Builders', 'Brick & Beam'], real_estate: ['Parkside Properties', 'Highrise Holdings'],
+  ecommerce: ['Shopdash', 'Doorstep Market'], gaming: ['Moonbit Games', 'Joystick Studios'], ai: ['Thinkwell AI', 'Neuron Works'],
+  robots: ['Gearhand Robotics', 'Tireless Machines'], space: ['Skyward Launch', 'Highorbit Aerospace'], defense: ['Shieldwall Defense', 'Ironguard Systems'],
+  airlines: ['Bluesky Airways', 'Cloudline Air'], hospitals: ['Greenvale Hospitals', 'Mercy Point Health'], wellness: ['Calm Waters Wellness', 'Evergreen Living'],
 };
 function suggestName(good: GoodId, w: WorldState): string {
   const taken = new Set(w.companies.map((c) => c.name.toLowerCase()));

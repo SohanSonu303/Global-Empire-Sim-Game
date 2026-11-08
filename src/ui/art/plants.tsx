@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import type { GoodId } from '../../engine/types';
 import { Bank, CrossSign, Depot, Hospital, Mine, OilGas } from './buildings';
 import { Box, Car, Cyl, Gable, OUTLINE, P, Person, Smoke, Tile, Tree, Windows, faceQuad, pts } from './iso';
+import { Airport, BatteryPlant, BuildersYard, CementPlant, Fulfillment, Hangar, LaunchPad, RobotWorks, Smelter, Spa, Towers, WaterWorks } from './plants4';
 
 const lvl = (level: number, min: number, max: number, per: number) => Math.min(max, min + Math.floor((level - 1) / per));
 
@@ -241,7 +242,7 @@ function PhoneFactory({ level }: { level: number }) {
   );
 }
 
-function DataCenter({ level }: { level: number }) {
+function DataCenter({ level, glow = '#3dbb6c', tower = '#5aa0d8' }: { level: number; glow?: string; tower?: string }) {
   const halls = lvl(level, 1, 2, 4);
   return (
     <g>
@@ -249,11 +250,11 @@ function DataCenter({ level }: { level: number }) {
       {Array.from({ length: halls }, (_, i) => (
         <g key={i}>
           <Box x={0.25 + i * 0.05} y={0.35 + i * 1.1} w={2.0} d={0.95} h={0.65} c="#2b3445" />
-          <Windows face="left" x={0.25 + i * 0.05} y={0.35 + i * 1.1} w={2.0} d={0.95} h={0.65} rows={2} cols={8} color="#3dbb6c" dark="#1a2130" seed={61 + i} litRatio={0.6} />
+          <Windows face="left" x={0.25 + i * 0.05} y={0.35 + i * 1.1} w={2.0} d={0.95} h={0.65} rows={2} cols={8} color={glow} dark="#1a2130" seed={61 + i} litRatio={0.6} />
           {[0, 1, 2].map((j) => <Cyl key={j} cx={0.6 + j * 0.6} cy={0.8 + i * 1.1} z={0.65} r={0.15} h={0.1} c="#5a6577" />)}
         </g>
       ))}
-      <Box x={2.3} y={0.4} w={0.55} d={0.9} h={1.0} c="#5aa0d8" />
+      <Box x={2.3} y={0.4} w={0.55} d={0.9} h={1.0} c={tower} />
       <Windows face="left" x={2.3} y={0.4} w={0.55} d={0.9} h={1.0} rows={3} cols={1} color="#cfe6ff" seed={63} />
       <Windows face="right" x={2.3} y={0.4} w={0.55} d={0.9} h={1.0} rows={3} cols={2} color="#a8c9e8" seed={64} />
       <circle cx={P(2.57, 0.85, 1.15)[0]} cy={P(2.57, 0.85, 1.15)[1]} r="1.6" fill="#e2574c" className="iso-blink" />
@@ -457,6 +458,27 @@ export function GoodBuilding({ good, level = 1 }: { good: GoodId; level?: number
     case 'medicine': return <PharmaLab level={level} />;
     case 'telecom': return <TelecomHub level={level} />;
     case 'clinics': return <Hospital level={level} />;
+    case 'copper': return <Mine level={level} ore="#c96a3c" ground="#8a6a50" silo="#d9a07a" />;
+    case 'lithium': return <Mine level={level} ore="#e8eef5" ground="#c9c2b0" silo="#e9eef7" ponds="#6fd0c8" />;
+    case 'bauxite': return <Mine level={level} ore="#b5523b" ground="#9a5a40" silo="#c98a6a" />;
+    case 'rare_earths': return <Mine level={level} ore="#8e7cc3" ground="#6f6a72" silo="#b9b0d8" />;
+    case 'limestone': return <Mine level={level} ore="#ddd6c6" ground="#a9a294" silo="#e9e4d8" />;
+    case 'natural_gas': return <OilGas level={level} gas />;
+    case 'aluminium': return <Smelter level={level} />;
+    case 'batteries': return <BatteryPlant level={level} />;
+    case 'cement': return <CementPlant level={level} />;
+    case 'water': return <WaterWorks level={level} />;
+    case 'construction': return <BuildersYard level={level} />;
+    case 'real_estate': return <Towers level={level} />;
+    case 'ecommerce': return <Fulfillment level={level} />;
+    case 'gaming': return <DataCenter level={level} glow="#9b7be0" tower="#d0679a" />;
+    case 'ai': return <DataCenter level={level} glow="#48c9b0" tower="#2b3445" />;
+    case 'robots': return <RobotWorks level={level} />;
+    case 'space': return <LaunchPad level={level} />;
+    case 'defense': return <Hangar level={level} />;
+    case 'airlines': return <Airport level={level} />;
+    case 'hospitals': return <Hospital level={level + 6} />;
+    case 'wellness': return <Spa level={level} />;
   }
 }
 

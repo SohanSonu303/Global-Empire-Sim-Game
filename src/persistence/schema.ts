@@ -2,15 +2,17 @@ import { z } from 'zod';
 import { SAVE_VERSION } from '../engine/data';
 import type { WorldState } from '../engine/types';
 import { addMissingGoods } from '../engine/world';
+import { repairMarket } from '../engine/market';
 import { ensureBanks } from '../engine/banks';
 import { ensureLicences } from '../engine/licences';
 import { ensurePlay } from '../engine/rewards';
+import { ensureRivals } from '../engine/tycoons';
 import { emptyDay } from '../engine/company';
 
 const num = z.number().finite();
 const industry = z.enum(['resources', 'energy', 'manufacturing', 'tech', 'retail', 'finance', 'health', 'services']);
 const good = z.string();
-const holding = z.object({ shares: num, avgCost: num });
+const holding = z.object({ shares: num, avgCost: num }).passthrough();
 
 const company = z
   .object({
@@ -75,8 +77,10 @@ export function parseWorld(raw: unknown): { ok: true; world: WorldState } | { ok
     c.sum30 = { ...emptyDay(), ...c.sum30 };
   }
   addMissingGoods(world);
+  repairMarket(world);
   ensureBanks(world);
   ensureLicences(world);
   ensurePlay(world);
+  ensureRivals(world);
   return { ok: true, world };
 }

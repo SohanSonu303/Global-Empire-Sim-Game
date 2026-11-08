@@ -1,27 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGame } from '../../store/game';
-import type { ScenarioId } from '../../engine/types';
 import { importSave, listSaves, readSave, type SaveMeta } from '../../persistence/saves';
 import { fmtMoney } from '../../engine/news';
+import { value } from '../../engine/startup';
+import { NewGameFlow, loadFlow, startFlow, type Flow } from './NewGame';
 import { CityScene } from '../art/art';
 import { Button, Card, cx } from '../components/core';
 
-const SCENARIOS: { id: ScenarioId; title: string; sub: string }[] = [
-  { id: 'young', title: 'Young Entrepreneur', sub: '$400,000 cash, no business. Build from nothing.' },
-  { id: 'established', title: 'Established Businessman', sub: '$10 million and a level 4 manufacturing company.' },
+const MODES: { id: Flow['mode']; title: string; sub: string; tag?: string }[] = [
+  { id: 'story', title: '🚀 Startup story', sub: 'Found a startup, win over an investor and sell it for $400K. Then buy your first company.', tag: 'Recommended' },
+  { id: 'established', title: '🏭 Quick start', sub: '$10 million and a level 4 steel company. Skip the startup.' },
 ];
 
 export function TitleScreen() {
-  const newGame = useGame((s) => s.newGame);
   const loadWorld = useGame((s) => s.loadWorld);
   const notify = useGame((s) => s.notify);
-  const [scenario, setScenario] = useState<ScenarioId>('young');
+  const [mode, setMode] = useState<Flow['mode']>('story');
+  const [flow, setFlow] = useState<Flow | null>(null);
+  const [saved, setSaved] = useState<Flow | null>(() => loadFlow());
   const [name, setName] = useState('My Empire');
   const [saves, setSaves] = useState<SaveMeta[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     listSaves().then(setSaves).catch(() => setSaves([]));
   }, []);
+
+  if (flow) return <NewGameFlow flow={flow} onExit={() => { setFlow(null); setSaved(loadFlow()); }} />;
 
   return (
     <div className="min-h-full flex flex-col">
@@ -34,15 +38,27 @@ export function TitleScreen() {
         </div>
       </div>
       <div className="px-gutter pb-8 flex-1">
+        {saved?.startup && saved.startup.stage !== 'lost' && (
+          <Card className="p-3 mt-4 border-gold/60" onClick={() => setFlow(saved)}>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="font-bold">Continue {saved.startup.name}</div>
+                <div className="text-xs text-muted num">Startup · week {saved.startup.week} · worth {fmtMoney(value(saved.startup))}</div>
+              </div>
+              <span className="text-gold font-bold">▶</span>
+            </div>
+          </Card>
+        )}
         <div className="text-sm font-bold uppercase tracking-wider text-muted mt-4 mb-2">New game</div>
         <div className="space-y-2">
-          {SCENARIOS.map((s) => (
+          {MODES.map((s) => (
             <button
               key={s.id}
-              onClick={() => setScenario(s.id)}
-              className={cx('w-full text-left rounded-card border p-3', scenario === s.id ? 'border-gold bg-gold/10' : 'border-line bg-card')}
+              onClick={() => setMode(s.id)}
+              aria-pressed={mode === s.id}
+              className={cx('w-full text-left rounded-card border p-3', mode === s.id ? 'border-gold bg-gold/10' : 'border-line bg-card')}
             >
-              <div className="font-bold">{s.title}</div>
+              <div className="flex items-center justify-between gap-2"><div className="font-bold">{s.title}</div>{s.tag && <span className="text-[11px] font-bold text-gold">{s.tag}</span>}</div>
               <div className="text-sm text-muted">{s.sub}</div>
             </button>
           ))}
@@ -55,7 +71,7 @@ export function TitleScreen() {
           onChange={(e) => setName(e.target.value)}
           className="w-full min-h-tap rounded-lg bg-bg border border-line-strong px-3 text-base outline-none focus:border-gold"
         />
-        <Button block size="lg" className="mt-4" onClick={() => newGame(scenario, name.trim() || 'My Empire')}>Start in Astoria</Button>
+        <Button block size="lg" className="mt-4" onClick={() => setFlow(startFlow(mode, name.trim() || 'My Empire'))}>{mode === 'story' ? 'Start my story' : 'Start in Astoria'}</Button>
 
         {saves.length > 0 && (
           <>

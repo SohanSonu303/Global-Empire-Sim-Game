@@ -1,6 +1,7 @@
 import { isStoring } from './warehouse';
-import { AI_UPGRADE_COST_GROWTH, GOODS, INDUSTRIES, IMPORT_PREMIUM, UPGRADE_COST_GROWTH, fixedAt, upgradeCost, LEVEL_CAP_MULT, MAX_LEVEL } from './data';
+import { AI_UPGRADE_COST_GROWTH, GOODS, INDUSTRIES, IMPORT_PREMIUM, UPGRADE_COST_GROWTH, fixedAt, upgradeCost, LEVEL_CAP_MULT, MAX_LEVEL, maxPriceMult } from './data';
 import { payOwners } from './ownership';
+import { noteOpsSaved } from './traits';
 import type { Company, DayResult, Explanation, GoodId, LoanReason, WorldState } from './types';
 
 export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -31,7 +32,7 @@ export function importPrice(w: WorldState, good: GoodId): number {
 
 /** A company's selling price today. */
 export function sellPrice(w: WorldState, c: Company): number {
-  return refPrice(w, c.good) * c.priceMult;
+  return refPrice(w, c.good) * Math.min(c.priceMult, maxPriceMult(c.good));
 }
 
 export function wageIndex(w: WorldState): number {
@@ -65,7 +66,7 @@ export function unitEconomics(w: WorldState, good: GoodId, opts?: { level?: numb
 }
 
 export function productivity(c: Company): number {
-  return GOODS[c.good].unitsPerWorker * (0.6 + 0.5 * c.morale);
+  return GOODS[c.good].unitsPerWorker * (0.6 + 0.5 * c.morale) * (c.isPlayer && c.ops ? 1.05 : 1);
 }
 
 /** Staff needed to run at full capacity. */
@@ -123,7 +124,7 @@ export function repayBuffer(c: Company): number {
 }
 
 export function nextUpgradeCost(c: Company): number {
-  return upgradeCost(c.good, c.level + 1, c.isPlayer ? UPGRADE_COST_GROWTH : AI_UPGRADE_COST_GROWTH);
+  return upgradeCost(c.good, c.level + 1, c.isPlayer ? UPGRADE_COST_GROWTH : AI_UPGRADE_COST_GROWTH) * (c.isPlayer && c.ops ? 0.9 : 1);
 }
 
 export function canUpgrade(c: Company): boolean {
@@ -213,8 +214,11 @@ export function runAutomation(w: WorldState, c: Company): void {
   if (a.autoUpgrade && canUpgrade(c)) {
     const util = c.last.sold / Math.max(1, c.capacity);
     const cost = nextUpgradeCost(c);
-    if (util > 0.9 && c.last.demand > c.capacity * 0.95 && c.cash > cost + a.minCash) {
+    // A monopoly (40%+ share) has no buyers left to grow into: extra levels only add fixed costs
+    const monopoly = c.isPlayer && c.last.marketShare > 0.4;
+    if (!monopoly && util > 0.9 && c.last.demand > c.capacity * 0.95 && c.cash > cost + a.minCash) {
       c.cash -= cost;
+      if (c.isPlayer && c.ops) noteOpsSaved(w, cost / 0.9 - cost);
       applyUpgrade(w, c);
     }
   }

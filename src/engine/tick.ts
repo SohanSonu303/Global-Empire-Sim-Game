@@ -9,11 +9,16 @@ import { addNews, fmtMoney, fmtPct } from './news';
 import { addXp, netWorth, updateProgress } from './progress';
 import { dailyRewards, monthlyReport } from './rewards';
 import { dailyStrategies } from './strategy';
+import { monthlyTraits, syncTraitPerks } from './traits';
 import { dailyWarehouses, rivalStockpiles } from './warehouse';
 import { computeAdvice } from './advisor';
 import { next } from './rng';
-import { creditEvents, ensureBanks, rebalanceLoans, writeOff } from './banks';
+import { creditEvents, ensureBanks, rebalanceLoans } from './banks';
 import { checkControl } from './ownership';
+import { dailyDisasters } from './disasters';
+import { dailyResources } from './resources';
+import { dailyAuctions, failCompany, monthlyExits } from './auctions';
+import { monthlyTycoons } from './tycoons';
 import type { WorldState } from './types';
 
 /**
@@ -24,7 +29,9 @@ export function step(w: WorldState): void {
   w.day += 1;
   const day = w.day;
 
+  syncTraitPerks(w);
   dailyEvents(w);
+  dailyDisasters(w);
   dailyMacro(w);
   ensureBanks(w);
   operateEconomy(w);
@@ -42,6 +49,8 @@ export function step(w: WorldState): void {
     rivalRelations(w);
   }
 
+  dailyResources(w);
+  dailyAuctions(w);
   dailyWarehouses(w);
   dailyStrategies(w);
 
@@ -51,6 +60,8 @@ export function step(w: WorldState): void {
 
   if (day % 30 === 0) {
     rivalStockpiles(w, () => next(w.rng));
+    monthlyTycoons(w);
+    monthlyExits(w);
     rebalanceLoans(w);
     creditEvents(w);
     const { prevRate, prevInflation, prevUnemployment } = monthlyMacro(w);
@@ -78,7 +89,9 @@ export function step(w: WorldState): void {
   dailyRewards(w, nw, (xp) => addXp(w, xp));
   if (day % 30 === 0) {
     const advice = computeAdvice(w).find((a) => a.severity !== 'good');
-    monthlyReport(w, nw, advice ? advice.title : 'Keep it up: your companies look healthy.', (xp) => addXp(w, xp));
+    const perks = monthlyTraits(w);
+    const rep = monthlyReport(w, nw, advice ? advice.title : 'Keep it up: your companies look healthy.', (xp) => addXp(w, xp));
+    if (rep && perks.length) rep.traits = perks;
   }
 }
 
@@ -113,16 +126,6 @@ function checkSolvency(w: WorldState, c: WorldState['companies'][number]): void 
     addNews(w, c.isPlayer ? 'player' : 'business', `${c.name} runs low on cash`,
       `The company is out of cash and its credit line is ${c.debt > 0 ? 'stretched' : 'unused'}.`, 'bad', [c.id]);
   }
-  if (c.lowCashDays > 45) {
-    c.bankrupt = true;
-    c.workers = 0;
-    writeOff(w, c);
-    addNews(w, c.isPlayer ? 'player' : 'business', `${c.name} files for bankruptcy`,
-      `After weeks without cash, ${c.name} has stopped making ${GOODS[c.good].name.toLowerCase()}.`, 'bad', [c.id]);
-    if (c.ticker) {
-      const s = w.stocks.find((x) => x.ticker === c.ticker);
-      if (s) s.newsImpact -= 0.3;
-    }
-  }
+  if (c.lowCashDays > 45) failCompany(w, c, `After weeks without cash, ${c.name} has stopped making ${GOODS[c.good].name.toLowerCase()}.`);
 }
 

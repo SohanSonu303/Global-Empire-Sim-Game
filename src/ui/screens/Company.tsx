@@ -1,7 +1,7 @@
 import { importedMuch, lowSupply, usableCap } from '../../engine/advisor';
 import { useState, type ReactNode } from 'react';
 import { useGame } from '../../store/game';
-import { GOODS, INDUSTRIES, MAX_LEVEL } from '../../engine/data';
+import { GOODS, INDUSTRIES, MAX_LEVEL, maxPriceMult } from '../../engine/data';
 import {
   companyValue, companyValueExplain, creditLimit, damageMult, repayBuffer, nextUpgradeCost, outputExplain, pnlExplain, productivity, refPrice, unitEconomics, workersForDemand,
 } from '../../engine/company';
@@ -23,6 +23,8 @@ import { unlocked, unlockLevel } from '../../engine/rewards';
 import { CAMPAIGN, CAMPAIGN_FADE, MONOPOLY_SHARE, WAR_PRICE, activeWar, campaignCost, campaignFatigue, campaignMult, campaignResult, probeChance, warTarget } from '../../engine/strategy';
 import { storable, totalRoom } from '../../engine/warehouse';
 import type { CampaignSize } from '../../engine/types';
+import { AUTO_EXPLORE_AT, DEPLETION_DAYS, RAW_UPKEEP, THIN_RESERVES, exploreCost, extractionMult, isRawMine, reserveCapMult, reservesOf } from '../../engine/resources';
+import { COVER, PREMIUM_RATE, disasterInfo } from '../../engine/disasters';
 
 type T = 'overview' | 'supply' | 'financials' | 'owners' | 'operations' | 'employees' | 'automation';
 
@@ -310,6 +312,8 @@ function Operations({ c, w }: { c: Company; w: WorldState }) {
         </Card>
       )}
       {c.isPlayer && !c.bankrupt && <CampaignCard c={c} w={w} />}
+      {isRawMine(c) && !c.bankrupt && <ReservesCard c={c} />}
+      {c.isPlayer && !c.bankrupt && <InsuranceCard c={c} w={w} />}
       {!c.isPlayer && <p className="text-sm text-muted">Last strategic move: <span className="text-text font-semibold">{c.aiLastAction}</span></p>}
     </div>
   );
@@ -352,12 +356,74 @@ function AutomationTab({ c }: { c: Company }) {
     <Card className="p-3 space-y-1">
       <Toggle label="Auto-recruit to meet demand" checked={a.autoRecruit} onChange={(v) => set({ autoRecruit: v })} />
       <Toggle label="Auto-upgrade when sold out" checked={a.autoUpgrade} onChange={(v) => set({ autoUpgrade: v })} />
+      <DownsizeRow c={c} />
       <Toggle label="Repay loans from spare cash first" checked={a.autoRepay !== false} onChange={(v) => set({ autoRepay: v })} />
       <Slider label="Dividends to you (of daily profit)" value={a.dividendPct} min={0} max={100} step={5} suffix="%" onCommit={(v) => set({ dividendPct: v })} />
       <Slider label="Inventory buffer (days of sales)" value={a.inventoryDays} min={0} max={3} step={0.1} onCommit={(v) => set({ inventoryDays: v })} />
       <WarehouseToggle c={c} on={!!a.toWarehouse} set={(v) => set({ toWarehouse: v })} />
+      {isRawMine(c) && <Toggle label={`Explore for new reserves below ${Math.round(AUTO_EXPLORE_AT * 100)}%`} checked={a.autoExplore !== false} onChange={(v) => set({ autoExplore: v })} />}
       <Slider label="Minimum cash (borrows to keep it)" value={a.minCash} min={0} max={Math.max(100_000, c.sum30.revenue)} step={1000} money onCommit={(v) => set({ minCash: v })} />
     </Card>
+  );
+}
+
+function ReservesCard({ c }: { c: Company }) {
+  const dispatch = useGame((s) => s.dispatch);
+  const r = reservesOf(c);
+  const cost = exploreCost(c);
+  const thin = r < THIN_RESERVES;
+  return (
+    <Card className="p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-bold">⛏️ Reserves left</div>
+        <div className={cx('text-sm font-bold tabular-nums', thin ? 'text-red' : r < 0.5 ? 'text-amber' : 'text-green')}>{Math.round(r * 100)}%</div>
+      </div>
+      <Progress className="mt-2" value={r} tone={thin ? 'red' : r < 0.5 ? 'amber' : 'green'} />
+      <div className="divide-y divide-line mt-1">
+        <Row label="Cost per unit to extract" value={`×${extractionMult(c).toFixed(2)}`} tone={extractionMult(c) > 1.2 ? 'bad' : undefined} />
+        <Row label="Output limit" value={reserveCapMult(c) < 1 ? `${Math.round(reserveCapMult(c) * 100)}% of the plant` : 'None'} tone={reserveCapMult(c) < 1 ? 'bad' : undefined} />
+        <Row label="Upkeep" value={`+${Math.round((RAW_UPKEEP - 1) * 100)}% on fixed costs`} />
+      </div>
+      <p className="text-xs text-dim mt-1">Every unit you dig, pump or harvest uses up the reserve. A full plant runs dry in about {Math.round(DEPLETION_DAYS / 365)} years. Below half, each unit costs more; below {Math.round(THIN_RESERVES * 100)}%, output falls.</p>
+      <Button block size="sm" className="mt-2" disabled={r > 0.9 || c.cash < cost} onClick={() => dispatch({ type: 'explore', companyId: c.id })}>
+        {r > 0.9 ? 'Reserves are nearly full' : `🔎 Explore for new reserves · ${fmtMoney(cost)}`}
+      </Button>
+      {r <= 0.9 && c.cash < cost && <p className="text-xs text-amber mt-1">The company has {fmtMoney(c.cash)}. Put money in from Financials, or let auto-explore pay (it can borrow).</p>}
+    </Card>
+  );
+}
+
+function InsuranceCard({ c, w }: { c: Company; w: WorldState }) {
+  const dispatch = useGame((s) => s.dispatch);
+  const on = !!c.insured;
+  const yearly = (Math.max(0, c.assets) * PREMIUM_RATE);
+  const last = w.play.disasters[w.play.disasters.length - 1];
+  return (
+    <Card className="p-3">
+      <Toggle label={`🛡️ Disaster insurance · ${fmtMoney(yearly)} a year`} checked={on} onChange={(v) => dispatch({ type: 'setInsurance', companyId: c.id, on: v })} />
+      <p className="text-xs text-dim">Pays {Math.round(COVER * 100)}% of repairs after earthquakes, floods, storms, wildfires, pandemics and fires. The premium is {fmtPct(PREMIUM_RATE, 1)} of the plant's value a year, added to fixed costs. Disasters are rare (about one every two or three years) and nobody can see them coming.{last ? ` The last one was a ${disasterInfo(last.kind).name.toLowerCase()} on day ${last.day}.` : ''}</p>
+    </Card>
+  );
+}
+
+function DownsizeRow({ c }: { c: Company }) {
+  const dispatch = useGame((s) => s.dispatch);
+  const [sure, setSure] = useState(false);
+  if (c.level <= 1) return null;
+  const util = c.sum30.sold / Math.max(1, c.capacity * 30);
+  return (
+    <div className="py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm">
+          <b>Close a production line</b>
+          <span className="block text-xs text-muted">Level {c.level} → {c.level - 1}: about 41% less capacity and 31% lower fixed costs. You sell some equipment. Plant used: {fmtPct(util, 0)}.</span>
+        </div>
+        <Button size="sm" variant={sure ? 'danger' : 'dark'} onClick={() => { if (sure) { void dispatch({ type: 'downsize', companyId: c.id }); setSure(false); } else setSure(true); }}>
+          {sure ? 'Confirm' : 'Close'}
+        </Button>
+      </div>
+      {sure && <p className="text-xs text-amber mt-1">Only worth it when the plant is much bigger than what you sell. Tap Confirm to close it.</p>}
+    </div>
   );
 }
 
@@ -522,7 +588,8 @@ function PriceSheet({ c, w, onClose }: { c: Company; w: WorldState; onClose: () 
         <div className="num text-3xl font-bold">{fmtPrice(ref * pm)}</div>
         <div className="text-sm text-muted">{Math.round(pm * 100)}% of the market price {fmtPrice(ref)}</div>
       </div>
-      <input type="range" min={0.5} max={2} step={0.01} value={pm} onChange={(e) => setPm(Number(e.target.value))} className="w-full h-tap mt-4 accent-[var(--color-gold)]" aria-label="Price" />
+      <input type="range" min={0.5} max={maxPriceMult(c.good)} step={0.01} value={pm} onChange={(e) => setPm(Number(e.target.value))} className="w-full h-tap mt-4 accent-[var(--color-gold)]" aria-label="Price" />
+      {GOODS[c.good].reg && <p className="text-xs text-muted mt-1">Regulated: the government caps your price at the market price.</p>}
       <div className="divide-y divide-line mt-2">
         <Row label="Unit cost (near full output)" value={fmtPrice(vc)} />
         <Row label="Margin per unit" value={fmtPrice(ref * pm - vc)} tone={ref * pm - vc > 0 ? 'good' : 'bad'} />

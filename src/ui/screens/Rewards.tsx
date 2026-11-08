@@ -152,6 +152,14 @@ export function ReportBody({ r }: { r: MonthReport }) {
           </div>
         ))}
       </div>
+      {r.traits && r.traits.length > 0 && (
+        <div className="mt-3 rounded-lg bg-card-2 border border-line p-2.5 text-left">
+          <div className="text-xs font-bold text-muted mb-1">Your traits this month</div>
+          {r.traits.map((t) => (
+            <div key={t.label} className="flex justify-between text-sm"><span>{t.label}</span><span className={cx('num font-semibold', t.amount >= 0 ? 'text-green' : 'text-red')}>+{fmtMoney(Math.abs(t.amount))}</span></div>
+          ))}
+        </div>
+      )}
       <div className="mt-3 rounded-lg border border-gold-edge/50 bg-gold/10 p-2.5 text-left text-sm"><span className="font-bold text-gold">Tip: </span>{r.tip}</div>
     </>
   );

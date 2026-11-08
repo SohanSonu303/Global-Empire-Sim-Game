@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useGame, type GuideSection } from '../../store/game';
 import { GOODS, GOOD_IDS, INDUSTRIES, startCost } from '../../engine/data';
 import { netWorth } from '../../engine/progress';
-import { portfolioValue } from '../../engine/market';
+import { rivalWorth } from '../../engine/rewards';
 import { fmtMoney, fmtPct } from '../../engine/news';
 import { BearBadge, BullBadge, IndustryThumb, Portrait } from '../art/art';
 import { Badge, Button, Card, Chips, Screen, SectionTitle, cx } from '../components/core';
@@ -118,7 +118,7 @@ function Tip({ tone = 'gold', children }: { tone?: 'gold' | 'warn'; children: Re
 
 function About() {
   const w = useGame((s) => s.world)!;
-  const richest = Math.max(...w.rivals.map((r) => r.cash + portfolioValue(w, r.holdings)));
+  const richest = Math.max(...w.rivals.map((r) => rivalWorth(w, r)));
   return (
     <>
       <Hero art={<IndustryThumb industry="tech" size={84} level={2} />} title="Build a business empire">
@@ -222,7 +222,8 @@ function Grow() {
       <Steps
         items={[
           { title: 'Early game: one industry', body: 'Your first industry licence is free. Get one company profitable, hire until output is close to capacity, then upgrade. Buy the materials you are missing from rivals with supply deals instead of building everything yourself.' },
-          { title: 'Mid game: more industries', body: 'Each new industry needs a government licence (from $200K for resources or retail up to $1M for finance, and 50% more for every licence you already hold). Buy it in the Planner, or get it free by buying a company in that industry.' },
+          { title: 'Mid game: more industries', body: 'Each new industry needs a government licence ($200K for retail, $250K for services, up to $1M for finance and $2M for resources, and 50% more for every licence you already hold). Buy it in the Planner, or get it free by buying a company in that industry.' },
+          { title: 'Late game: mega businesses', body: 'Space, defense, airlines, robots, hospitals and wellness also need a government permit ($250M to $1B). Bring in a partner to share the bill, or buy an existing plant at auction to get the permit with it.' },
           { title: 'Mid game: make money work', body: 'Put spare cash into stocks that pay dividends, instead of leaving it idle.' },
           { title: 'Late game: take on the billionaires', body: 'Build big companies in the rivals’ industries and take their customers. See the Beat rivals page.' },
         ]}
@@ -410,7 +411,7 @@ function Rivals() {
   const list = w.rivals
     .map((r) => {
       const owned = w.companies.filter((c) => c.ownerId === r.id && !c.bankrupt);
-      return { r, nw: r.cash + portfolioValue(w, r.holdings), owned };
+      return { r, nw: rivalWorth(w, r), owned };
     })
     .sort((a, b) => b.nw - a.nw);
   return (

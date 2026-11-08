@@ -2,8 +2,10 @@
  * The personal assistant: reads the world and returns a prioritised to-do list.
  * Pure function of state, so the UI can recompute it every snapshot.
  */
-import { GOODS, GOOD_IDS, INDUSTRIES, LEVEL_CAP_MULT, fixedAt, startCost } from './data';
-import { licenceFee } from './licences';
+import { GOODS, GOOD_IDS, INDUSTRIES, LEVEL_CAP_MULT, fixedAt, maxPriceMult, startCost } from './data';
+import { licenceFee, permitFee } from './licences';
+import { MONOPOLY_SHARE, probeChance } from './strategy';
+import { foundPrice } from './traits';
 import { companyValue, creditLimit, damageMult, importPrice, nextUpgradeCost, productivity, refPrice, supplyCover, unitEconomics } from './company';
 import { effectMult } from './economy';
 import { contractsOf, dailyNeed, dealPartners, judgeOffer, ownerRival } from './contracts';
@@ -173,6 +175,13 @@ export function cashRisk(w: WorldState, c: Company): CashRisk {
 }
 
 export function adviseCompany(w: WorldState, c: Company): Advice[] {
+  const out = adviseRaw(w, c);
+  // Regulated prices can't go above the market price, so never suggest it
+  if (!GOODS[c.good].reg) return out;
+  return out.filter((a) => !(a.action?.type === 'command' && a.action.cmd.type === 'setPrice' && a.action.cmd.priceMult > maxPriceMult(c.good) + 1e-9));
+}
+
+function adviseRaw(w: WorldState, c: Company): Advice[] {
   const out: Advice[] = [];
   const def = GOODS[c.good];
   const add = (a: Omit<Advice, 'companyId'>) => out.push({ ...a, companyId: c.id });
@@ -330,6 +339,27 @@ export function adviseCompany(w: WorldState, c: Company): Advice[] {
 
   // Selling out: grow
   const util = perDay(w, c, 'sold') / Math.max(1, usableCap(w, c));
+  // Too big for its market: paying high-level fixed costs for capacity nobody buys
+  if (settled && c.level >= 8 && util < 0.5) {
+    add({
+      id: `idle-${c.id}`, severity: 'warn', title: `${c.name} is too big for its market`,
+      body: `It sells only ${fmtPct(util, 0)} of what it can make, but pays level-${c.level} fixed costs (${fmtMoney(c.last.fixed)} a day). Closing one production line cuts fixed costs by about 31% and turns off auto-upgrade.`,
+      action: { type: 'command', label: 'Close a production line', cmd: { type: 'downsize', companyId: c.id } },
+    });
+  }
+  // Monopoly: close to or above the antitrust line
+  if (c.last.marketShare > MONOPOLY_SHARE) {
+    add({
+      id: `mono-${c.id}`, severity: 'tip', title: `${c.name} has monopoly power`,
+      body: `You sell ${fmtPct(c.last.marketShare, 0)} of all ${GOODS[c.good].name.toLowerCase()}. Buyers switch away half as fast now, so a higher price earns more per unit. Regulators may investigate (about ${fmtPct(probeChance(c), 0)} a month). Paying the fine is usually cheapest.`,
+      action: c.priceMult < 1.3 ? { type: 'command', label: 'Raise price 5%', cmd: { type: 'setPrice', companyId: c.id, priceMult: c.priceMult * 1.05 } } : open,
+    });
+  } else if (c.last.marketShare > MONOPOLY_SHARE * 0.85) {
+    add({
+      id: `mono-${c.id}`, severity: 'tip', title: `${c.name} is close to a monopoly`,
+      body: `You sell ${fmtPct(c.last.marketShare, 0)} of the market. Above ${fmtPct(MONOPOLY_SHARE, 0)} buyers stay more loyal, but regulators start to look at you.`,
+    });
+  }
   // Only grow when the bigger plant (x1.7 capacity) would still be well used, and it is not short of cash
   const growPayback = upgradePayback(w, c, price);
   // A demand boom from the news ends: don't build for demand that goes away
@@ -496,7 +526,7 @@ function ownSupplyIdea(w: WorldState, mine: Company[]): Advice | null {
   const top = ideas[0];
   if (!top) return null;
   const op = opportunities(w).find((o) => o.good === top.g);
-  const fee = licenceFee(w, GOODS[top.g].industry);
+  const fee = licenceFee(w, GOODS[top.g].industry) + permitFee(w, top.g);
   if (!op || op.margin <= 0 || w.player.cash < (startCost(top.g) + fee) * 0.5) return null;
   // A licence must be worth it: the yearly saving should cover plant + licence within two years
   if (fee > 0 && (startCost(top.g) + fee) / Math.max(1, top.saving) > 730) return null;
@@ -626,7 +656,7 @@ export function opportunities(w: WorldState): Opportunity[] {
         : tags.includes('crowded')
           ? 'There is a lot of spare capacity, so prices are under pressure.'
           : 'A steady market.';
-    return { good: g, price, priceChange, trend, demand, capacity, gap, producers: sellers.length, unitCost: ue.total, margin, foundCost: startCost(g), licence, paybackDays, tags, reason };
+    return { good: g, price, priceChange, trend, demand, capacity, gap, producers: sellers.length, unitCost: ue.total, margin, foundCost: foundPrice(w, g), licence, paybackDays, tags, reason };
   }).sort((a, b) => score(b) - score(a));
 }
 

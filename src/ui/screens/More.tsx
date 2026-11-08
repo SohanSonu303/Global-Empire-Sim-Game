@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useGame, type Route } from '../../store/game';
-import { INDUSTRIES } from '../../engine/data';
+import { GOODS, INDUSTRIES } from '../../engine/data';
+import { companyValue } from '../../engine/company';
+import { rivalWorth } from '../../engine/rewards';
 import { netWorth } from '../../engine/progress';
 import { portfolioValue } from '../../engine/market';
 import { fmtMoney, fmtPct } from '../../engine/news';
-import type { Personality } from '../../engine/types';
+import type { Personality, TraitId } from '../../engine/types';
+import { SWAP_FEE, SWAP_LEVEL, TRAITS as CAREER_TRAITS, traitDef, traitsOf } from '../../engine/traits';
 import { deleteSave, exportSave, importSave, listSaves, readSave, type SaveMeta } from '../../persistence/saves';
 import { Portrait } from '../art/art';
 import { Badge, Button, Card, Progress, Screen, SectionTitle, cx } from '../components/core';
@@ -24,7 +27,7 @@ export function MoreScreen() {
     { r: { screen: 'rivals' }, label: 'People & Rivals', sub: 'Billionaires and their moves', icon: <IconPerson /> },
     { r: { screen: 'stats' }, label: 'Statistics', sub: 'GDP, inflation, rates, your net worth', icon: <IconStats /> },
     { r: { screen: 'government' }, label: 'Government', sub: 'Central bank now; politics in Phase 2', icon: <IconBank /> },
-    { r: { screen: 'strategy' }, label: 'Deals & Strategies', sub: 'Contracts, tenders, warehouses, price wars, tips', icon: <IconTarget /> },
+    { r: { screen: 'strategy' }, label: 'Deals & Strategies', sub: 'Contracts, auctions, tenders, warehouses, price wars, tips', icon: <IconTarget /> },
     { r: { screen: 'reports' }, label: 'Monthly reports', sub: 'Your report cards and grades', icon: <IconStats /> },
     { r: { screen: 'achievements' }, label: 'Achievements', sub: 'Your milestones', icon: <IconTrophy /> },
     { r: { screen: 'saves' }, label: 'Saves', sub: 'Save, load, export and import', icon: <IconSave /> },
@@ -47,8 +50,52 @@ export function MoreScreen() {
           ))}
         </div>
       </Card>
+      <TraitsCard />
       <SoundToggle />
     </Screen>
+  );
+}
+
+function TraitsCard() {
+  const w = useGame((s) => s.world)!;
+  const dispatch = useGame((s) => s.dispatch);
+  const [from, setFrom] = useState<TraitId | null>(null);
+  const mine = traitsOf(w);
+  const canSwap = w.player.level >= SWAP_LEVEL && !w.player.traitSwapped;
+  return (
+    <Card className="mt-3 p-3">
+      <SectionTitle>Your career traits</SectionTitle>
+      {mine.length === 0 && <p className="text-sm text-muted">This game started before traits existed. New games let you pick two.</p>}
+      <div className="space-y-2">
+        {mine.map((id) => {
+          const t = traitDef(id);
+          return (
+            <div key={id} className={cx('rounded-lg border p-2.5', from === id ? 'border-gold bg-gold/10' : 'border-line bg-card-2')}>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{t.icon}</span>
+                <div className="flex-1 min-w-0"><div className="font-bold">{t.name}</div><div className="text-xs text-muted">{t.perks[0]}</div></div>
+                {canSwap && <Button size="sm" variant="dark" onClick={() => setFrom(from === id ? null : id)}>{from === id ? 'Cancel' : 'Swap'}</Button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {from && (
+        <div className="mt-2 space-y-1.5">
+          <div className="text-xs text-muted">Swap {traitDef(from).name} for (one time, {fmtMoney(SWAP_FEE)}):</div>
+          {CAREER_TRAITS.filter((t) => !mine.includes(t.id)).map((t) => (
+            <button key={t.id} disabled={w.player.cash < SWAP_FEE} onClick={() => { void dispatch({ type: 'swapTrait', from, to: t.id }); setFrom(null); }}
+              className="w-full text-left rounded-lg border border-line bg-card-2 hover:border-gold px-2.5 py-2 disabled:opacity-45">
+              <span className="font-semibold">{t.icon} {t.name}</span> <span className="text-xs text-muted">· {t.short}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {mine.length > 0 && !canSwap && (
+        <p className="text-xs text-dim mt-2">{w.player.traitSwapped ? 'You already used your career change.' : `From level ${SWAP_LEVEL} you can swap one trait once, for ${fmtMoney(SWAP_FEE)}.`}</p>
+      )}
+      {w.player.startup && <p className="text-xs text-dim mt-2">Founder of {w.player.startup.name} ({w.player.startup.idea}), sold to {w.player.startup.investor} for {fmtMoney(w.player.startup.payout)}.</p>}
+    </Card>
   );
 }
 
@@ -126,7 +173,7 @@ export function RivalsScreen() {
   const w = useGame((s) => s.world)!;
   const push = useGame((s) => s.push);
   const rivals = w.rivals
-    .map((r) => ({ r, nw: r.cash + portfolioValue(w, r.holdings) }))
+    .map((r) => ({ r, nw: rivalWorth(w, r) }))
     .sort((a, b) => b.nw - a.nw);
   const me = netWorth(w);
   return (
@@ -140,7 +187,7 @@ export function RivalsScreen() {
                 <span className="num w-5 text-center text-dim font-bold">{i + 1}</span>
                 <Portrait rival={r} size={48} />
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold">{r.name}</div>
+                  <div className="font-bold flex items-center gap-1.5">{r.name}{r.tycoon && <Badge tone="gold">Tycoon</Badge>}</div>
                   <div className="text-xs text-muted">{r.title}</div>
                 </div>
                 <div className="text-right">
@@ -175,7 +222,11 @@ export function RivalScreen({ id }: { id: string }) {
   const w = useGame((s) => s.world)!;
   const r = w.rivals.find((x) => x.id === id);
   if (!r) return null;
-  const owned = w.companies.filter((c) => c.ownerId === r.id);
+  const owned = w.companies.filter((c) => c.ownerId === r.id && !c.bankrupt);
+  const listed = owned.filter((c) => c.ticker);
+  const privateCos = owned.filter((c) => !c.ticker);
+  const push = useGame((s) => s.push);
+  const stakes = w.companies.filter((c) => c.isPlayer && (c.partners ?? []).some((p) => p.ownerId === r.id));
   const holdings = Object.entries(r.holdings).sort((a, b) => b[1].shares - a[1].shares);
   const relPct = (r.relation + 100) / 200;
   return (
@@ -213,18 +264,47 @@ export function RivalScreen({ id }: { id: string }) {
         <Card className="p-3 space-y-1 text-sm">
           <div className="flex justify-between"><span className="text-muted">Cash</span><span className="num font-semibold">{fmtMoney(r.cash)}</span></div>
           <div className="flex justify-between"><span className="text-muted">Portfolio</span><span className="num font-semibold">{fmtMoney(portfolioValue(w, r.holdings))}</span></div>
-          <div className="flex justify-between"><span className="text-muted">Controls</span><span className="font-semibold text-right">{owned.map((c) => c.name).join(', ') || '—'}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Private companies</span><span className="num font-semibold">{fmtMoney(privateCos.reduce((s, c) => s + Math.max(0, companyValue(c)), 0))}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-muted shrink-0">Controls (listed)</span><span className="font-semibold text-right">{listed.map((c) => c.name).join(', ') || '—'}</span></div>
           {holdings.slice(0, 6).map(([t, h]) => {
             const s = w.stocks.find((x) => x.ticker === t)!;
             return <div key={t} className="flex justify-between"><span className="text-muted">{t}</span><span className="num">{fmtPct(h.shares / s.shares)} · {fmtMoney(h.shares * s.price)}</span></div>;
           })}
         </Card>
-        <div className="grid grid-cols-3 gap-2 mt-3">
-          <Button disabled>Propose Deal</Button>
-          <Button variant="dark" disabled>Sabotage?</Button>
-          <Button variant="ghost" disabled>Ignore</Button>
-        </div>
-        <p className="text-xs text-dim mt-2">Deals and takeovers between empires arrive with M&A in Phase 2. Rivals may still approach you with offers.</p>
+        {privateCos.length > 0 && (
+          <>
+            <SectionTitle>{r.tycoon ? 'Companies founded or bought' : 'Private companies'}</SectionTitle>
+            <div className="space-y-2">
+              {privateCos.map((c) => (
+                <Card key={c.id} className="p-3 flex items-center gap-3" onClick={() => push({ screen: 'company', id: c.id })}>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold truncate">{c.name}</div>
+                    <div className="text-xs text-muted">{GOODS[c.good].name} · level {c.level} · since day {c.founded}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="num font-semibold">{fmtMoney(companyValue(c))}</div>
+                    <div className={cx('text-xs num', c.sum30.netIncome < 0 ? 'text-red' : 'text-green')}>{fmtMoney(c.sum30.netIncome)} / 30d</div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+        {stakes.length > 0 && (
+          <Card className="mt-3 p-3 text-sm">
+            <div className="font-bold">Partner in your companies</div>
+            {stakes.map((c) => <div key={c.id} className="flex justify-between mt-1"><span className="text-muted">{c.name}</span><span className="num">{fmtPct((c.partners ?? []).find((p) => p.ownerId === r.id)!.pct, 0)}</span></div>)}
+          </Card>
+        )}
+        <Card className="mt-3 p-3 text-sm">
+          <div className="font-bold">How {r.name.split(' ')[0]} plays</div>
+          <ul className="mt-1 space-y-1 text-muted list-disc pl-4">
+            {r.tycoon && <li>Starts companies in short, growing markets in {r.focus.map((f) => INDUSTRIES[f].name.toLowerCase()).join(', ')}, or ones that feed what they already own.</li>}
+            {r.tycoon && <li>May offer to buy a stake in your fast-growing private companies, above the fair price.</li>}
+            <li>Bids at bankruptcy auctions when a company fits {r.tycoon ? 'their plans' : 'their industries'} ({r.personality.aggression > 0.7 ? 'bids hard' : r.personality.patience > 0.85 ? 'never overpays' : 'bids carefully'}).</li>
+            <li>Trades shares on the exchange and may bid for your companies.</li>
+          </ul>
+        </Card>
       </Screen>
     </div>
   );

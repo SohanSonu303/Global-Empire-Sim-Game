@@ -6,7 +6,7 @@
 import { GOODS, INDUSTRIES, LICENCE_FEE } from './data';
 import { licenceDiscount } from './rewards';
 import { addNews, fmtMoney } from './news';
-import type { CommandResult, IndustryId, WorldState } from './types';
+import type { CommandResult, GoodId, IndustryId, WorldState } from './types';
 
 export function licences(w: WorldState): IndustryId[] {
   return w.player.licences ?? [];
@@ -30,7 +30,34 @@ export function grantLicence(w: WorldState, ind: IndustryId): void {
 
 /** Licences for every industry you already run a company in (old saves, buyouts, the starting company). */
 export function ensureLicences(w: WorldState): void {
-  for (const c of w.companies) if (c.isPlayer && !c.bankrupt) grantLicence(w, GOODS[c.good].industry);
+  for (const c of w.companies) if (c.isPlayer && !c.bankrupt) { grantLicence(w, GOODS[c.good].industry); grantPermit(w, c.good); }
+}
+
+// ---------- permits for mega businesses ----------
+
+export function permits(w: WorldState): GoodId[] {
+  return w.player.permits ?? [];
+}
+
+/** True if this good needs no permit, or you already hold it. */
+export function hasPermit(w: WorldState, good: GoodId): boolean {
+  return !GOODS[good].permit || permits(w).includes(good);
+}
+
+/** What the permit for this good costs you (0 if none is needed or you hold it). Charged when you found the company. */
+export function permitFee(w: WorldState, good: GoodId): number {
+  if (hasPermit(w, good)) return 0;
+  return Math.round((GOODS[good].permit ?? 0) * (1 - licenceDiscount(w)));
+}
+
+/** Buying or winning a company brings its permit with it. */
+export function grantPermit(w: WorldState, good: GoodId): void {
+  if (GOODS[good].permit && !permits(w).includes(good)) w.player.permits = [...permits(w), good];
+}
+
+/** Does a rival already run (and so hold the permit for) this business? */
+export function rivalHasPermit(w: WorldState, rivalId: string, good: GoodId): boolean {
+  return !GOODS[good].permit || w.companies.some((c) => c.ownerId === rivalId && c.good === good && !c.bankrupt);
 }
 
 export function buyLicence(w: WorldState, ind: IndustryId): CommandResult {

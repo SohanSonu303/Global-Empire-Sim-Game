@@ -25,6 +25,8 @@ const FLOW_COLOR: Partial<Record<GoodId, string>> = {
   iron_ore: '#b0704a', grain: '#e3c25a', cotton: '#f4f1ea', silicon: '#b9d6ee', crude_oil: '#2b2e36', electricity: '#ffe08a',
   plastics: '#4a8fe0', steel: '#c9d3e2', chips: '#3dbb6c',
   timber: '#9c6b3f', chemicals: '#c58be0', glass: '#9fd0ff', freight: '#f0a33a', medicine: '#3dbb9c',
+  copper: '#d9824a', lithium: '#e8eef5', bauxite: '#b5523b', rare_earths: '#8e7cc3', limestone: '#ddd6c6', natural_gas: '#7fb7e6',
+  aluminium: '#d6dde8', batteries: '#5fd08a', cement: '#a9a49a', water: '#4fb3ff', construction: '#e3b04b', robots: '#9aa6b6', ai: '#48c9b0',
 };
 
 interface Plot { c: Company; x: number; y: number }

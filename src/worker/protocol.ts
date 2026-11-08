@@ -1,4 +1,5 @@
 import type { Command, CommandResult, ScenarioId, WorldState } from '../engine/types';
+import type { GameSetup } from '../engine/startup';
 
 export type Speed = 0 | 1 | 2 | 5;
 
@@ -6,7 +7,7 @@ export type Speed = 0 | 1 | 2 | 5;
 export const SPEED_MS: Record<Exclude<Speed, 0>, number> = { 1: 1500, 2: 750, 5: 300 };
 
 export type ToWorker =
-  | { type: 'new'; seed: number; scenario: ScenarioId }
+  | { type: 'new'; seed: number; scenario: ScenarioId; setup?: GameSetup }
   | { type: 'load'; world: WorldState }
   | { type: 'speed'; speed: Speed }
   | { type: 'command'; id: number; cmd: Command }

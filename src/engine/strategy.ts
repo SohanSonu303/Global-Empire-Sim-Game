@@ -9,6 +9,7 @@ import { stockByTicker } from './market';
 import { addNews, fmtMoney, fmtPct, fmtPrice } from './news';
 import { chance, int, next, pick, range } from './rng';
 import { banner, unlocked } from './rewards';
+import { jobBonus } from './traits';
 import { newCompany, seedInputs } from './world';
 import type { CampaignSize, CommandResult, Company, GoodId, Job, PendingEvent, PriceWar, Rival, Tender, WorldState } from './types';
 
@@ -96,7 +97,7 @@ function dailyJobs(w: WorldState): void {
     if (j.delivered >= j.qty - 1e-6) {
       j.status = 'done';
       j.early = w.day <= j.startDay + j.days * 0.75;
-      const extra = j.early ? j.bonus : 0;
+      const extra = (j.early ? j.bonus : 0) + jobBonus(w, j.pay);
       if (c) c.cash += extra;
       const rv = w.rivals.find((r) => r.id === j.rivalId);
       remember(rv, w, 6, `${c?.name ?? 'You'} delivered a contract on time.`);
@@ -150,6 +151,21 @@ const GOV_BUYERS: Partial<Record<GoodId, string[]>> = {
   plastics: ['Water Board'],
   chemicals: ['Water Board'],
   crude_oil: ['Strategic Reserve'],
+  defense: ['Ministry of Defence', 'Army Procurement Office', 'Navy Command'],
+  space: ['National Space Agency', 'Weather Satellite Office'],
+  construction: ['Roads Agency', 'Public Housing Agency', 'Schools Building Fund'],
+  cement: ['Roads Agency', 'Dam Authority'],
+  aluminium: ['National Rail'],
+  water: ['City Parks Department'],
+  natural_gas: ['Strategic Reserve'],
+  ai: ['Tax Office', 'Ministry of Health'],
+  robots: ['Postal Service'],
+  batteries: ['Grid Storage Program'],
+  copper: ['Grid Upgrade Program'],
+  airlines: ['Diplomatic Travel Office'],
+  hospitals: ['National Health Service'],
+  wellness: ['Veterans Care Service'],
+  real_estate: ['Government Offices'],
 };
 
 export function tenderScore(t: Tender, price: number, quality: number): number {
@@ -385,6 +401,19 @@ export function switchMult(c: Company): number {
   return c.isPlayer && c.last.marketShare > MONOPOLY_SHARE ? 0.5 : 1;
 }
 
+/** Antitrust fine: 20% of a year's profit (at least 0.5% of a year's revenue), never more than half the profit. */
+export function antitrustFine(c: Company): number {
+  const yearProfit = c.sum30.netIncome * 12;
+  const yearRev = c.sum30.revenue * 12;
+  const f = Math.max(yearProfit * 0.2, yearRev * 0.005);
+  return yearProfit > 0 ? Math.min(f, yearProfit * 0.5) : f;
+}
+
+/** Chance to win in court: 45% at a normal brand, up to 70% with a strong one. */
+export function courtOdds(c: Company): number {
+  return clamp(0.45 + 0.4 * (c.brand - 1), 0.3, 0.7);
+}
+
 /** Monthly chance of an antitrust investigation. */
 export function probeChance(c: Company): number {
   return c.last.marketShare > MONOPOLY_SHARE ? Math.min(0.5, (c.last.marketShare - MONOPOLY_SHARE) * 1.5) : 0;
@@ -396,15 +425,15 @@ function monthlyMonopoly(w: WorldState): void {
     if (pr <= 0 || w.day - (w.play.probes[c.id] ?? -999) < 120 || w.pending.some((e) => e.template === 'antitrust')) continue;
     if (!chance(w.rng, pr)) continue;
     w.play.probes[c.id] = w.day;
-    const yearRev = c.sum30.revenue * 12;
-    const fine = Math.round(yearRev * 0.05);
+    const fine = Math.round(antitrustFine(c));
+    const win = courtOdds(c);
     const ev: PendingEvent = {
       id: `ev${++w.seq}`, template: 'antitrust', day: w.day, companyId: c.id, rivalId: null, expiresDay: w.day + 10,
       title: 'Antitrust investigation',
       body: `Regulators say ${c.name} controls ${fmtPct(c.last.marketShare, 0)} of ${GOODS[c.good].name.toLowerCase()} and is hurting competition.`,
       choices: [
-        { id: 'fight', label: `Fight it in court (${fmtMoney(yearRev * 0.01)})`, detail: '50% chance to win · lose = double fine' },
-        { id: 'split', label: 'Sell 25% of the plant', detail: 'Smaller company · some cash back' },
+        { id: 'fight', label: `Fight it in court (${fmtMoney(fine * 0.25)})`, detail: `${fmtPct(win, 0)} chance to win (better with a strong brand) · lose = 1.5x fine` },
+        { id: 'split', label: 'Sell 25% of the plant', detail: 'Capacity and fixed costs drop 25% · cash back' },
         { id: 'fine', label: `Pay the fine (${fmtMoney(fine)})`, detail: 'Keep everything' },
       ],
       amount: fine,
@@ -498,22 +527,22 @@ function monthlyVentures(w: WorldState): void {
 export function resolveStrategyEvent(w: WorldState, ev: PendingEvent, c: Company, choiceId: string): CommandResult {
   const rv = w.rivals.find((r) => r.id === ev.rivalId);
   if (ev.template === 'antitrust') {
-    const yearRev = c.sum30.revenue * 12;
-    const fine = ev.amount ?? yearRev * 0.05;
+    const fine = ev.amount ?? antitrustFine(c);
     if (choiceId === 'fight') {
-      const fee = yearRev * 0.01;
+      const fee = fine * 0.25;
       c.cash -= fee;
-      if (chance(w.rng, 0.5)) {
+      if (chance(w.rng, courtOdds(c))) {
         addNews(w, 'politics', `${c.name} wins its antitrust case`, 'The court found no abuse of market power.', 'good', [c.id]);
         return ok('You won the case!');
       }
-      c.cash -= fine * 2;
-      addNews(w, 'politics', `${c.name} loses its antitrust case`, `The company must pay ${fmtMoney(fine * 2)}.`, 'bad', [c.id]);
-      return ok(`You lost the case: fine ${fmtMoney(fine * 2)}`);
+      c.cash -= fine * 1.5;
+      addNews(w, 'politics', `${c.name} loses its antitrust case`, `The company must pay ${fmtMoney(fine * 1.5)}.`, 'bad', [c.id]);
+      return ok(`You lost the case: fine ${fmtMoney(fine * 1.5)}`);
     }
     if (choiceId === 'split') {
       const cash = companyValue(c) * 0.25 * 0.8;
       c.capacity *= 0.75;
+      c.fixedScale = (c.fixedScale ?? 1) * 0.75; // less plant, less rent and overhead
       c.assets *= 0.75;
       c.workers = Math.round(c.workers * 0.75);
       w.player.cash += cash;
