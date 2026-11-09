@@ -46,10 +46,14 @@ export function createGoodsMarket(): Record<GoodId, GoodMarket> {
   return out;
 }
 
+/** Share of an oil supply cut that reaches real crude output */
+export const OIL_CUT_PASS = 0.5;
+
 export function effectMult(w: WorldState, kind: 'goodDemand' | 'goodSupply', good: GoodId): number {
   let m = 1;
   for (const e of w.effects) if (e.kind === kind && e.target === good) m += e.delta;
-  if (kind === 'goodSupply' && good === 'crude_oil') m *= w.macro.oilSupply;
+  // Producers draw on reserves, so a supply shock cuts real crude output by about half the headline figure
+  if (kind === 'goodSupply' && good === 'crude_oil') m *= w.macro.oilSupply < 1 ? 1 - OIL_CUT_PASS * (1 - w.macro.oilSupply) : w.macro.oilSupply;
   return Math.max(0.2, m);
 }
 

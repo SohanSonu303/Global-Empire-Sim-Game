@@ -38,8 +38,8 @@ export function HomeScreen() {
           <MiniStat label="Portfolio" value={fmtMoney(portfolioValue(w, w.player.holdings))} />
         </div>
 
-        <Assistant />
         <InboxCard />
+        <Assistant />
 
         {w.player.level < 4 && (
           <Card className="mt-3 p-3 border-gold/50 bg-gradient-to-r from-gold/15 to-card" onClick={() => push({ screen: 'guide' })}>
