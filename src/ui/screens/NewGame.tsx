@@ -15,7 +15,7 @@ import { Badge, Button, Card, Progress, cx } from '../components/core';
 import { GoodThumb } from '../art/plants';
 import { play } from '../sound';
 
-export type FlowStep = 'traits' | 'idea' | 'investor' | 'pitch' | 'run' | 'exit' | 'starter';
+export type FlowStep = 'traits' | 'path' | 'idea' | 'investor' | 'pitch' | 'run' | 'exit' | 'starter';
 
 export interface Flow {
   v: 2;
@@ -81,10 +81,14 @@ export function NewGameFlow({ flow: initial, onExit }: { flow: Flow; onExit: () 
       {flow.mode === 'story' && <StoryProgress step={flow.step} />}
       {flow.step === 'traits' && (
         <TraitPicker value={flow.traits} onBack={() => back(null)}
-          onDone={(traits) => (flow.mode === 'established' ? finishEstablished(traits) : setFlow({ ...flow, traits, step: 'idea' }))} />
+          onDone={(traits) => (flow.mode === 'established' ? finishEstablished(traits) : setFlow({ ...flow, traits, step: 'path' }))} />
+      )}
+      {flow.step === 'path' && (
+        <PathPick onBack={() => back('traits')} onPlay={() => setFlow({ ...flow, step: 'idea' })}
+          onSkip={() => { saveFlow(null); newGame('young', flow.name, { traits: flow.traits }); }} />
       )}
       {flow.step === 'idea' && (
-        <IdeaPicker flow={flow} onBack={() => back('traits')} onDone={(idea, kind, startupName) => setFlow({ ...flow, idea, kind, startupName, step: 'investor' })} />
+        <IdeaPicker flow={flow} onBack={() => back('path')} onDone={(idea, kind, startupName) => setFlow({ ...flow, idea, kind, startupName, step: 'investor' })} />
       )}
       {flow.step === 'investor' && flow.idea && (
         <InvestorPicker idea={flow.idea} onBack={() => back('idea')} onDone={(investor) => setFlow({ ...flow, investor, step: 'pitch' })} />
@@ -117,7 +121,7 @@ export function NewGameFlow({ flow: initial, onExit }: { flow: Flow; onExit: () 
 }
 
 const STORY_STEPS: { id: FlowStep[]; label: string }[] = [
-  { id: ['traits'], label: 'Traits' },
+  { id: ['traits', 'path'], label: 'Traits' },
   { id: ['idea', 'investor', 'pitch'], label: 'Pitch' },
   { id: ['run'], label: 'Startup' },
   { id: ['exit', 'starter'], label: 'Empire' },
@@ -144,6 +148,36 @@ function Header({ kicker, title, sub, onBack }: { kicker: string; title: string;
       <div className="text-xs font-bold uppercase tracking-wider text-gold">{kicker}</div>
       <h1 className="text-2xl font-black leading-tight mt-0.5">{title}</h1>
       {sub && <p className="text-sm text-muted mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- play the startup or skip it
+
+/** Cash you start the main game with when you skip the startup */
+const SKIP_CASH = 600_000;
+
+function PathPick({ onPlay, onSkip, onBack }: { onPlay: () => void; onSkip: () => void; onBack: () => void }) {
+  return (
+    <div className="anim-fade">
+      <Header kicker="Chapter 1 · The startup" title="How do you want to start?" onBack={onBack}
+        sub="Your traits are set. Play a short startup game first, or skip straight to the main game." />
+      <div className="space-y-2.5">
+        <button onClick={onPlay} className="w-full text-left rounded-card border border-gold bg-gold/10 p-3 flex gap-3 items-center">
+          <span className="grid place-items-center size-12 shrink-0 rounded-xl text-2xl bg-gold/20 border border-gold/50" aria-hidden>🚀</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2"><span className="font-bold">Play the startup</span><Badge tone="gold">Recommended</Badge></div>
+            <div className="text-xs text-muted mt-0.5">Pitch an investor, grow a small startup and sell it for {short(PAYOUT)}. Then buy your first company with what you earned. Teaches price, marketing, R&D and cash.</div>
+          </div>
+        </button>
+        <button onClick={onSkip} className="w-full text-left rounded-card border border-line bg-card hover:border-line-strong p-3 flex gap-3 items-center">
+          <span className="grid place-items-center size-12 shrink-0 rounded-xl text-2xl bg-card-2 border border-line" aria-hidden>⏩</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold">Skip to the main game</div>
+            <div className="text-xs text-muted mt-0.5">Start now with {short(SKIP_CASH)} and your traits. You found your own first company; your assistant shows you how.</div>
+          </div>
+        </button>
+      </div>
     </div>
   );
 }
