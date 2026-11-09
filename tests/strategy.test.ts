@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommand, createWorld, netWorth, refPrice, step, storedQty } from '../src/engine';
+import { GOODS, applyCommand, buildCost, createWorld, netWorth, refPrice, spoilMonth, spoilRate, step, storedQty } from '../src/engine';
 import { checkIn, streakReward, unlocked } from '../src/engine/rewards';
 import { addXp } from '../src/engine/progress';
 import { resolveEvent } from '../src/engine/events';
@@ -147,4 +147,70 @@ describe('strategies', () => {
     expect(w.play.reports.length).toBeGreaterThan(10);
     expect(w.companies.every((c) => Number.isFinite(c.cash) && Number.isFinite(c.priceMult))).toBe(true);
   });
+});
+
+describe('output split and storage ageing', () => {
+  it('a split sends a share of output to the warehouse and caps deals and contracts', () => {
+    const w = createWorld(21, 'established');
+    w.player.level = 12; w.player.cash = 5e7;
+    const c = mine(w);
+    expect(applyCommand(w, { type: 'setSplit', companyId: c.id, split: { deals: 0, contracts: 0.1, warehouse: 0.2 } }).ok).toBe(false); // no warehouse yet
+    expect(applyCommand(w, { type: 'buildWarehouse' }).ok).toBe(true);
+    expect(applyCommand(w, { type: 'setSplit', companyId: c.id, split: { deals: 0.6, contracts: 0.6, warehouse: 0.2 } }).ok).toBe(true);
+    expect(c.split!.deals + c.split!.contracts + c.split!.warehouse).toBeLessThanOrEqual(1 + 1e-9); // scaled down to 100%
+    applyCommand(w, { type: 'setSplit', companyId: c.id, split: { deals: 0, contracts: 0.1, warehouse: 0.2 } });
+    for (let i = 0; i < 20; i++) { step(w); w.pending = []; }
+    const stored = w.play.warehouses[0].stock[c.good]?.qty ?? 0;
+    expect(stored).toBeGreaterThan(c.capacity * 0.2 * 10);
+    // a deal bigger than the deals share is refused
+    const buyer = w.companies.find((x) => !x.isPlayer && !x.bankrupt && GOODS[x.good].inputs.some((i) => i.good === c.good))!;
+    const r = applyCommand(w, { type: 'offerContract', companyId: c.id, partnerId: buyer.id, side: 'sell', qtyPerDay: c.capacity * 0.1, price: refPrice(w, c.good) * 1.1, days: 30 });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/output split/);
+  }, 60000);
+
+  it('durable goods lose 0.25% a month, perishables more, and old stock spoils faster', () => {
+    expect(spoilMonth('steel')).toBeCloseTo(0.0025);
+    expect(spoilMonth('food')).toBeGreaterThan(spoilMonth('grain'));
+    expect(spoilRate('steel', 1)).toBeCloseTo(0.0025 / 30);
+    expect(spoilRate('steel', 6)).toBeGreaterThan(spoilRate('steel', 1) * 2);
+    expect(spoilRate('steel', 100)).toBeCloseTo((0.0025 * 3) / 30); // capped at 3x
+    const w = createWorld(3, 'established');
+    w.player.level = 12; w.player.cash = 5e7;
+    applyCommand(w, { type: 'buildWarehouse' });
+    expect(buildCost(w)).toBeGreaterThan(700_000); // the second one costs far more
+  });
+
+  it('stored stock can be sent to contracts, deals or the market', () => {
+    const w = createWorld(21, 'established');
+    w.player.level = 12; w.player.cash = 5e7;
+    const c = mine(w);
+    applyCommand(w, { type: 'buildWarehouse' });
+    const wh = w.play.warehouses[0];
+    wh.stock[c.good] = { qty: 3000, cost: refPrice(w, c.good) * 0.7, since: w.day };
+    // nothing to send to yet
+    expect(applyCommand(w, { type: 'sendStock', id: wh.id, good: c.good, qty: 100, to: 'contracts' }).ok).toBe(false);
+    expect(applyCommand(w, { type: 'sendStock', id: wh.id, good: c.good, qty: 100, to: 'deals' }).ok).toBe(false);
+    // a contract: stock is delivered and paid at once
+    w.play.jobs.push({ id: 'jt', source: 'gov', buyerName: 'Gov', good: c.good, qty: 500, delivered: 0, pay: 500 * refPrice(w, c.good), bonus: 0, penalty: 0,
+      days: 60, deadline: w.day + 60, startDay: w.day, status: 'active', offerUntil: w.day, companyId: c.id } as any);
+    const cash = c.cash;
+    expect(applyCommand(w, { type: 'sendStock', id: wh.id, good: c.good, qty: 800, to: 'contracts' }).ok).toBe(true);
+    expect(w.play.jobs.find((j) => j.id === 'jt')!.delivered).toBeCloseTo(500); // only what the contract needs
+    expect(c.cash).toBeGreaterThan(cash);
+    expect(wh.stock[c.good]!.qty).toBeCloseTo(2500);
+    // a deal: stock is set aside and delivered first each day
+    const buyer = w.companies.find((x) => !x.isPlayer && !x.bankrupt && GOODS[x.good].inputs.some((i) => i.good === c.good))!;
+    w.contracts.push({ id: 'kt', good: c.good, sellerId: c.id, buyerId: buyer.id, qtyPerDay: 20, price: refPrice(w, c.good), startDay: w.day, endDay: w.day + 10, shortfall: 0, delivered: 0 });
+    expect(applyCommand(w, { type: 'sendStock', id: wh.id, good: c.good, qty: 1000, to: 'deals' }).ok).toBe(true);
+    const k = w.contracts.find((x) => x.id === 'kt')!;
+    expect(k.banked).toBeLessThanOrEqual(11 * 20 + 1e-6); // no more than the deal still needs
+    const before = k.banked!;
+    step(w); w.pending = [];
+    expect(k.banked!).toBeCloseTo(before - 20);
+    // the market: sent to your own company to sell
+    const inv = c.inventory;
+    expect(applyCommand(w, { type: 'sendStock', id: wh.id, good: c.good, qty: 100, to: 'market' }).ok).toBe(true);
+    expect(c.inventory).toBeGreaterThan(inv);
+  }, 60000);
 });

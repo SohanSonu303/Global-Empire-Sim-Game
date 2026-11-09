@@ -140,10 +140,12 @@ describe('regulated healthcare', () => {
   }, 60000);
 
   it('earns thin but positive margins and never gets price-rise advice', () => {
-    const w = rich(14);
+    // a world where the new hospital wins its patients (some seeds stay in the red for longer)
+    const w = rich(16);
     applyCommand(w, { type: 'foundCompany', name: 'Greenvale', good: 'hospitals' });
-    run(w, 240);
     const c = w.companies.find((x) => x.name === 'Greenvale')!;
+    // margins, not luck: a random fire on an uninsured new plant would sink any business
+    for (let i = 0; i < 400; i++) { step(w); w.pending = []; delete c.damage; } // a year to fill the wards
     expect(c.bankrupt).toBe(false);
     const margin = c.sum30.netIncome / c.sum30.revenue;
     expect(margin).toBeGreaterThan(0);

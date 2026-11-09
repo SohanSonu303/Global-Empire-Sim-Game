@@ -13,6 +13,8 @@ import { IndustrialPark } from '../art/Park';
 import { useAttention } from '../advice';
 import { ShortageNote } from './Chain';
 import { OwnersTab } from './Owners';
+import { RunningCard } from './Running';
+import { SplitCard } from './Split';
 import { isBank } from '../../engine/banks';
 import { outsidePct, playerPct } from '../../engine/ownership';
 import { Badge, BottomSheet, Button, Card, Chips, Progress, Screen, StatPill, cx } from '../components/core';
@@ -135,6 +137,8 @@ function Overview({ c, w }: { c: Company; w: WorldState }) {
     <div className="grid grid-cols-[1fr_1fr] gap-2.5">
       {!c.bankrupt && <SiteCard c={c} w={w} />}
       {!c.bankrupt && c.isPlayer && <div className="col-span-2 -mt-3"><ShortageNote w={w} good={c.good} mine={c} /></div>}
+      {!c.bankrupt && c.isPlayer && <RunningCard c={c} w={w} />}
+      {!c.bankrupt && c.isPlayer && <SplitCard c={c} w={w} />}
       <Cutaway c={c} />
       <div className="space-y-2">
         <FloorCard title="Production">
@@ -308,7 +312,7 @@ function Operations({ c, w }: { c: Company; w: WorldState }) {
           <div className="text-sm font-bold mb-2">Budgets (% of revenue)</div>
           <Slider label="Marketing → brand" value={c.marketingPct * 100} min={0} max={15} step={0.5} suffix="%" onCommit={(v) => dispatch({ type: 'setSpend', companyId: c.id, marketingPct: v / 100, rdPct: c.rdPct })} />
           <Slider label="R&D → quality" value={c.rdPct * 100} min={0} max={15} step={0.5} suffix="%" onCommit={(v) => dispatch({ type: 'setSpend', companyId: c.id, marketingPct: c.marketingPct, rdPct: v / 100 })} />
-          <p className="text-xs text-dim mt-1">Brand and quality move slowly toward what your budget supports. Both raise your share of customers.</p>
+          <p className="text-xs text-dim mt-1">Brand and quality move slowly toward what your budget supports. Marketing also wins new customers faster. Shoppers care about brands ({fmtPct(0.05, 0)} is typical); factories buying materials mostly compare price ({fmtPct(0.02, 0)}–{fmtPct(0.03, 0)} is plenty).</p>
         </Card>
       )}
       {c.isPlayer && !c.bankrupt && <CampaignCard c={c} w={w} />}

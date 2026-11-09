@@ -14,7 +14,7 @@ export type UnlockKey =
   | 'ventures' | 'tips' | 'squeeze' | 'licence20' | 'lookGold' | 'lookHeli' | 'lookNeon';
 
 export const UNLOCKS: { level: number; key: UnlockKey; title: string; body: string; icon: string }[] = [
-  { level: 2, key: 'contracts', icon: '📋', title: 'Contracts board', body: 'Rivals and the government post delivery jobs that pay above market.' },
+  { level: 2, key: 'contracts', icon: '📋', title: 'Contracts board', body: 'Rivals and the government post delivery jobs: a guaranteed buyer, usually near the market price.' },
   { level: 3, key: 'campaigns', icon: '📣', title: 'Brand campaigns', body: 'Run your own ad campaigns to lift sales for a few weeks.' },
   { level: 3, key: 'warehouse', icon: '🏬', title: 'Warehouses', body: 'Store extra output and sell it later when prices are higher.' },
   { level: 4, key: 'tenders', icon: '🏛️', title: 'Government tenders', body: 'Bid against rivals for big public orders.' },

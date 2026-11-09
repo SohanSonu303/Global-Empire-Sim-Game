@@ -7,7 +7,8 @@ import {
   DEADLINE_WEEK, FREELANCE, GOAL_VALUE, IDEAS, IDEA_IDS, INVESTORS, INVEST_AMOUNT, PAYOUT, PITCH_FINANCE_ASKED, PITCH_IDEA_ASKED, REVIEW_EVERY, START_TRUST, VALUE_WEEKS, WEEKLY_RATE,
   answerEvent, bigValuation, pitchQuestions, borrow, capacityOf, bankLimit, econOf, fire, hire, hireCost, launch, lesson, newStartup, nextReviewWeek, payout, pitchResult,
   playWeek, repay, ruleCheck, runway, seeReview, setMarketing, setPrice, setRd, setSide, starterOffers, targetFor, unitMargin, value, valueParts,
-  type FreelanceKind, type IdeaId, type InvestorId, type Review, type Startup,
+  LEVELS, SALES_CUT, SALES_REACH, SALES_FROM, TECH_FROM, TECH_QUALITY, TECH_ROYALTY, levelOf, marketingBudgetFor, peopleFrom, qualityFrom, rdBudgetFor, setSalesPartner, setTechPartner, techFee,
+  type FreelanceKind, type Level, type IdeaId, type InvestorId, type Review, type Startup,
 } from '../../engine/startup';
 import type { TraitId } from '../../engine/types';
 import { Badge, Button, Card, Progress, cx } from '../components/core';
@@ -314,7 +315,7 @@ function Pitch({ flow, onDone, onBack }: { flow: Flow; onDone: () => void; onBac
   return (
     <div className="anim-fade">
       <Header kicker={`Pitching ${inv.firm}`} title={result ? (result.pass ? 'Deal!' : 'No deal') : `Question ${answers.length + 1} of ${qs.length}`}
-        sub={!result ? <>Finance math and technical questions about your business. <b className="text-text">One wrong answer and there is no deal.</b></> : undefined}
+        sub={!result ? <>Simple money questions and a few about your business. <b className="text-text">You can get one wrong.</b></> : undefined}
         onBack={answers.length && !result ? () => setAnswers(answers.slice(0, -1)) : onBack} />
       {!result && (
         <div className="flex gap-1.5 mb-3" aria-hidden>
@@ -400,6 +401,45 @@ function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; su
       <div className={cx('num text-lg font-bold leading-tight', tone === 'good' && 'text-green', tone === 'bad' && 'text-red')}>{value}</div>
       {sub && <div className="text-[11px] text-dim leading-snug">{sub}</div>}
     </div>
+  );
+}
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+const LEVEL_LABEL: Record<Level, string> = { off: 'Off', low: 'Low', normal: 'Normal', high: 'High' };
+
+/** Four simple budget levels instead of fiddly +/- steps */
+function LevelPick({ label, value, at, effect, sub, onPick }: { label: string; value: number; at: (l: Level) => number; effect: (amount: number) => string; sub: ReactNode; onPick: (amount: number) => void }) {
+  const cur = levelOf(value, at);
+  return (
+    <div className="py-2.5 border-b border-line">
+      <div className="flex justify-between text-sm"><span className="font-semibold">{label}</span><span className="num text-gold">{fmtMoney(value)}/wk</span></div>
+      <div className="text-[11px] text-muted leading-snug">{sub}</div>
+      <div className="grid grid-cols-4 gap-1.5 mt-1.5">
+        {LEVELS.map((l) => (
+          <button key={l} onClick={() => onPick(at(l))} aria-pressed={cur === l}
+            className={cx('rounded-lg border px-1 py-1.5 text-center', cur === l ? 'border-gold bg-gold text-gold-ink' : 'border-line bg-card-2')}>
+            <div className="text-xs font-bold">{LEVEL_LABEL[l]}{l === 'normal' && cur !== l ? ' ★' : ''}</div>
+            <div className={cx('text-[10px] num', cur === l ? 'opacity-80' : 'text-dim')}>{at(l) ? fmtMoney(at(l)) : '$0'}</div>
+          </button>
+        ))}
+      </div>
+      <div className="text-[11px] text-dim mt-1">{effect(value)}</div>
+    </div>
+  );
+}
+
+function Toggle({ on, title, sub, onClick }: { on: boolean; title: string; sub: ReactNode; onClick: () => void }) {
+  return (
+    <button onClick={onClick} aria-pressed={on} className="w-full flex items-center gap-2 py-2.5 text-left border-b border-line last:border-0">
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold">{title}</div>
+        <div className="text-[11px] text-muted leading-snug">{sub}</div>
+      </div>
+      <span className={cx('w-11 h-6 rounded-full border relative shrink-0 transition-colors', on ? 'bg-gold border-gold-edge' : 'bg-card-2 border-line-strong')}>
+        <span className={cx('absolute top-0.5 size-[18px] rounded-full bg-white transition-all', on ? 'left-[22px]' : 'left-0.5')} />
+      </span>
+    </button>
   );
 }
 
@@ -513,8 +553,6 @@ function StartupRun({ s, onChange, onRestart }: { s: Startup; onChange: (s: Star
     onChange(n);
   };
   const answer = (id: string) => mut((n) => answerEvent(n, id));
-  const mStep = Math.max(100, Math.round(e.reachCost * 10 / 50) * 50);
-  const rStep = e.model === 'hours' ? 200 : 500;
 
   const pl: [string, number][] = L ? [
     [`Sales (${fmtNum(L.sold)} ${L.sold === 1 ? e.unit : e.units})`, L.revenue],
@@ -523,6 +561,7 @@ function StartupRun({ s, onChange, onRestart }: { s: Startup; onChange: (s: Star
     [e.varShare ? 'Store cut' : `Cost per ${e.unit}`, -L.variable],
     ['Marketing', -L.marketing],
     ['R&D', -L.rd],
+    ...((L.partners ?? 0) > 0 ? [['Partners (fees and cuts)', -(L.partners ?? 0)] as [string, number]] : []),
     ...(L.interest > 0 ? [['Loan interest', -L.interest] as [string, number]] : []),
   ] : [];
 
@@ -617,14 +656,22 @@ function StartupRun({ s, onChange, onRestart }: { s: Startup; onChange: (s: Star
             sub={<>Rivals charge {fmtMoney(e.ref)}. You keep <b className={unitMargin(s) > 0 ? 'text-green' : 'text-red'}>{fmtMoney(unitMargin(s))}</b> per {e.unit}.</>}
             minus={{ label: '−5%', onClick: () => mut((n) => setPrice(n, n.price * 0.95)), disabled: s.price <= e.ref * 0.41 }}
             plus={{ label: '+5%', onClick: () => mut((n) => setPrice(n, n.price * 1.05)), disabled: s.price >= e.ref * 2.49 }} />
-          <Lever label="Marketing" value={`${fmtMoney(s.marketing)}/wk`}
-            sub={e.model === 'copies' && !s.launched ? 'Builds hype for launch day.' : 'Reaches new people. They forget you if you stop.'}
-            minus={{ label: '−', onClick: () => mut((n) => setMarketing(n, n.marketing - mStep)), disabled: s.marketing <= 0 }}
-            plus={{ label: '+', onClick: () => mut((n) => setMarketing(n, n.marketing + mStep)), disabled: s.marketing >= 10_000 }} />
-          <Lever label="R&D" value={`${fmtMoney(s.rd)}/wk`}
+          <LevelPick label="Marketing" value={s.marketing} at={(l) => marketingBudgetFor(s, l)}
+            sub={e.model === 'copies' && !s.launched ? 'Builds hype for launch day. ★ Normal suits most weeks.' : 'Reaches new people. They forget you if you stop. ★ Normal suits most weeks.'}
+            effect={(a) => `About ${fmtNum(peopleFrom(s, a))} new people a week${s.salesPartner && s.launched ? ', plus your sales partner' : ''}.`}
+            onPick={(a) => mut((n) => setMarketing(n, a))} />
+          <LevelPick label="R&D" value={s.rd} at={(l) => rdBudgetFor(s, l)}
             sub={!s.launched ? 'Builds the product faster and raises quality.' : e.model === 'copies' ? 'Ships updates that bring players back.' : 'Raises quality: more buyers, fewer leave.'}
-            minus={{ label: '−', onClick: () => mut((n) => setRd(n, n.rd - rStep)), disabled: s.rd <= 0 }}
-            plus={{ label: '+', onClick: () => mut((n) => setRd(n, n.rd + rStep)), disabled: s.rd >= 10_000 }} />
+            effect={(a) => `Quality heads to ${Math.round(qualityFrom(s, a) * 100)}%${s.techPartner ? ' (with licensed tech)' : ''}.`}
+            onPick={(a) => mut((n) => setRd(n, a))} />
+          <div className="text-xs font-bold uppercase tracking-wider text-muted mt-3">Partners</div>
+          <div className="text-[11px] text-muted leading-snug">Like buying supplies in the main game: use what bigger companies already have instead of building it all yourself.</div>
+          <Toggle on={!!s.techPartner} title="🔧 Licence their tech"
+            sub={<>{cap(TECH_FROM[s.idea])}. {!s.launched ? <>Builds your product faster and adds {Math.round(TECH_QUALITY * 100)} points of quality. {fmtMoney(techFee(s))} a week until launch, then {Math.round(TECH_ROYALTY * 100)}% of sales.</> : <>Adds {Math.round(TECH_QUALITY * 100)} points of quality for {Math.round(TECH_ROYALTY * 100)}% of sales.</>}</>}
+            onClick={() => mut((n) => setTechPartner(n, !n.techPartner))} />
+          <Toggle on={!!s.salesPartner} title="🤝 Sales partner"
+            sub={<>{cap(SALES_FROM[s.idea])}. From launch, reaches about {fmtNum(peopleFrom(s, marketingBudgetFor(s, 'normal') * SALES_REACH))} new people a week for you. They keep {Math.round(SALES_CUT * 100)}% of your sales. Free until you sell.</>}
+            onClick={() => mut((n) => setSalesPartner(n, !n.salesPartner))} />
           <Lever label="Team" value={`${s.team} ${s.team === 1 ? 'person' : 'people'}`}
             sub={<>Each hire costs {fmtMoney(e.salary)}/week{e.perPerson !== Infinity ? ` and handles ${fmtNum(e.perPerson)} ${e.units}` : ''}{!s.launched ? ' and builds the product' : ''}. Hiring costs a week of pay.</>}
             minus={{ label: 'Let go', onClick: () => mut((n) => { fire(n); }), disabled: s.team <= 1 }}

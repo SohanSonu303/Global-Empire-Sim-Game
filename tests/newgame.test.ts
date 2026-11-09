@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommand, createWorld, fixedAt, nextUpgradeCost, productivity, runAutomation, step } from '../src/engine';
+import { MAINT, applyCommand, createWorld, fixedAt, nextUpgradeCost, productivity, runAutomation, step } from '../src/engine';
 import { resolveEvent } from '../src/engine/events';
 import { antitrustFine } from '../src/engine/strategy';
 import { monthlyTraits, noteStockSale, setTraits } from '../src/engine/traits';
@@ -28,7 +28,7 @@ describe('monopoly fixes', () => {
     expect(resolveEvent(w, 'ea', 'split').ok).toBe(true);
     expect(c.fixedScale).toBeCloseTo(0.75);
     step(w);
-    expect(c.last.fixed).toBeCloseTo(fixedAt(c.good, c.level) * w.macro.priceLevel * 0.75, 0);
+    expect(c.last.fixed).toBeCloseTo(fixedAt(c.good, c.level) * w.macro.priceLevel * 0.75 * (1 + MAINT.normal.cost), 0); // plus maintenance
   });
 
   it('closing a production line lowers level and fixed costs; auto-upgrade stops at a monopoly', () => {
@@ -143,7 +143,7 @@ function run64(idea: IdeaId, seed: number, bot: (s: Startup) => void, kind?: 'de
 const rightAnswers = (qs: PitchQuestion[]) => qs.map((q) => q.options.findIndex((o) => o.ok));
 
 describe('startup mini-game', () => {
-  it('the pitch is strict: 5 finance and technical questions, all must be right, only the right investor listens', () => {
+  it('the pitch: 5 finance and business questions, one wrong answer is forgiven, only the right investor listens', () => {
     for (const q of [...PITCH_FINANCE, ...IDEA_IDS.flatMap((i) => PITCHES[i])]) {
       expect(q.options.filter((o) => o.ok).length, q.q).toBe(1);
       expect(q.options.length, q.q).toBe(4);
@@ -166,10 +166,14 @@ describe('startup mini-game', () => {
     const ok = rightAnswers(qs);
     expect(pitchResult('ai', 'quinn', qs, ok)).toMatchObject({ pass: true, amount: INVEST_AMOUNT.ai });
     const oneWrong = [...ok]; oneWrong[3] = (ok[3] + 1) % 4;
-    const r = pitchResult('ai', 'quinn', qs, oneWrong);
+    const one = pitchResult('ai', 'quinn', qs, oneWrong);
+    expect(one.pass).toBe(true); // one slip is forgiven
+    expect(one.misses).toHaveLength(1);
+    const twoWrong = [...oneWrong]; twoWrong[0] = (ok[0] + 1) % 4;
+    const r = pitchResult('ai', 'quinn', qs, twoWrong);
     expect(r.pass).toBe(false);
     expect(r.amount).toBe(0);
-    expect(r.misses).toHaveLength(1);
+    expect(r.misses).toHaveLength(2);
     expect(pitchResult('ai', 'harbor', qs, ok)).toMatchObject({ pass: false, offTopic: true });
     const fq = pitchQuestions('freelance', 9);
     expect(pitchResult('freelance', 'harbor', fq, rightAnswers(fq)).pass).toBe(true);

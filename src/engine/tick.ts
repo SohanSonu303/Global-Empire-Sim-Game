@@ -19,6 +19,10 @@ import { dailyDisasters } from './disasters';
 import { dailyResources } from './resources';
 import { dailyAuctions, failCompany, monthlyExits } from './auctions';
 import { monthlyTycoons } from './tycoons';
+import { dailyBusiness, weeklyManagers } from './business';
+import { dailyInbox, monthlyInbox } from './inbox';
+import { weeklyRivalry } from './rivalry';
+import { monthlyCycle } from './cycle';
 import type { WorldState } from './types';
 
 /**
@@ -35,6 +39,7 @@ export function step(w: WorldState): void {
   dailyMacro(w);
   ensureBanks(w);
   operateEconomy(w);
+  dailyBusiness(w);
 
   for (const c of w.companies) {
     if (c.bankrupt) continue;
@@ -47,12 +52,15 @@ export function step(w: WorldState): void {
     for (const c of w.companies) corporateAI(w, c);
     for (const r of w.rivals) rivalInvestorAI(w, r);
     rivalRelations(w);
+    weeklyRivalry(w);
+    weeklyManagers(w);
   }
 
   dailyResources(w);
   dailyAuctions(w);
   dailyWarehouses(w);
   dailyStrategies(w);
+  dailyInbox(w);
 
   updatePrices(w);
   processOrders(w);
@@ -62,6 +70,8 @@ export function step(w: WorldState): void {
     rivalStockpiles(w, () => next(w.rng));
     monthlyTycoons(w);
     monthlyExits(w);
+    monthlyCycle(w);
+    monthlyInbox(w);
     rebalanceLoans(w);
     creditEvents(w);
     const { prevRate, prevInflation, prevUnemployment } = monthlyMacro(w);

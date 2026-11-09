@@ -69,6 +69,59 @@ const REWARDS: Feature[] = [
   },
 ];
 
+const RUNNING: Feature[] = [
+  {
+    icon: '🧲', name: 'Winning customers',
+    see: 'Company › Overview › Running the business: the Customers bar shows how many buyers you have compared with an established firm, and how many weeks until 80%.',
+    how: [
+      'A new company starts with about a quarter of the customers an established firm has, so it loses money for the first few months.',
+      'Marketing wins customers faster: shoppers follow brands (about 5% of sales is typical for products), while factories buying materials mostly compare price (2–3% is plenty).',
+      'Happy customers stay. Satisfaction comes from filling orders, a fair price and quality close to your rivals. Unhappy customers slowly drift away.',
+      'Your assistant tells you how much to spend and how many weeks it saves.',
+    ],
+    todo: 'Spend on marketing while you build up customers, then trim it once you are established. Never run out of stock.',
+  },
+  {
+    icon: '📥', name: 'The monthly inbox',
+    see: 'Home › Inbox. Two to five decisions a month: pay claims, volume deals, cheaper suppliers, faulty batches, worn machines, training, late payers, rival attacks.',
+    how: [
+      'Every choice is a trade-off: cash now against morale, customers or risk later.',
+      'If you do not answer within two weeks, the default happens. It is rarely the best choice.',
+      'A manager can answer for you (Company › Running the business): a manager picks safe choices after two days, a top manager picks the best one at once.',
+    ],
+    todo: 'Check the inbox once a month, and whenever a rival makes a move. Big, risky choices are worth your attention; hire managers for companies you do not want to watch.',
+  },
+  {
+    icon: '⚔️', name: 'Rivals fight back',
+    see: 'When you enter a market, the biggest rival there gets in touch. When you take their customers, their move lands in your inbox.',
+    how: [
+      'Aggressive rivals cut prices for six weeks; ambitious ones flood the market with ads; some poach your best staff; ruthless ones spread rumours.',
+      'You can match a price cut, answer with your own ads, pay retention bonuses, or sue.',
+      'Friendly rivals strike back less often. Telling one "I\'m here to win" makes them watch you closely.',
+    ],
+    todo: 'Match price cuts only when your margin can take it; otherwise counter with ads or ride it out.',
+  },
+  {
+    icon: '🔧', name: 'Machines, staff and cash flow',
+    see: 'Company › Overview › Running the business: machines, team experience and money owed by customers.',
+    how: [
+      'Machines wear as they run. Normal maintenance keeps up with a busy plant; low saves money but output drops and breakdowns rise; high brings worn machines back.',
+      'New hires start slower and learn over a few weeks. Unhappy staff quit, and every replacement starts green.',
+      'Factories and shops that buy your materials pay over about a month, so profit arrives as cash later. Shoppers pay at once.',
+    ],
+    todo: 'Keep maintenance normal, morale above 60% and a cash buffer for the month your customers take to pay.',
+  },
+  {
+    icon: '📉', name: 'Booms and recessions',
+    see: 'News warns of a coming recession about two months ahead. The World tab and your assistant show where the economy is.',
+    how: [
+      'Every few years a recession cuts what shoppers buy by about 10% for 6 to 11 months; a recovery follows.',
+      'Some products grow for years (AI, robots, online stores, gaming) while others slowly fade (phones, laptops, fashion).',
+    ],
+    todo: 'Build cash before a downturn, avoid big loans, and put new money into growing markets.',
+  },
+];
+
 const STRATEGIES: Feature[] = [
   {
     icon: '🔨', name: 'Bankruptcy auctions',
@@ -158,7 +211,7 @@ const STRATEGIES: Feature[] = [
   {
     icon: '📋', name: 'Contracts board', unlock: 'contracts',
     see: 'Deals & Strategies → Contracts lists 3–4 offers, e.g. "Halcyon Motors wants 5,000 steel within 60 days: $820K, bonus $82K if early, penalty $164K if missed."',
-    how: ['Offers come from rival companies short of a material and from the government.', 'Pay is 15–30% above the market price.', 'Each day deliveries come out of your stock before normal sales, then from your warehouses.', 'Finish within 75% of the time for the bonus. Done: XP and a better relationship. Missed: penalty and an angry rival.'],
+    how: ['Offers come from rival companies short of a material and from the government.', 'Pay is about the market price (−3% to +5%); rush jobs of 30–45 days pay 3–6% more. The real prize is a guaranteed buyer at a locked price.', 'Each company runs 2 contracts at first, one more every 2 plant levels (up to 6), and contracts can book at most 70% of its output.', 'Each day deliveries come out of your stock before normal sales, then from your warehouses.', 'Finish within 75% of the time for a 5% bonus; a miss costs up to 25%. Done: XP and a better relationship. Missed: penalty and an angry rival.'],
     todo: 'Accept jobs your plant can handle on top of normal sales. Watch the progress bar.',
   },
   {
@@ -170,7 +223,7 @@ const STRATEGIES: Feature[] = [
   {
     icon: '🏬', name: 'Warehouses', unlock: 'warehouse',
     see: 'Deals & Strategies → Warehouses shows how full each one is, what is inside, its value and the daily cost.',
-    how: ['Build one for $150K (each next one costs more) and upgrade it to level 10: +60% space a level.', 'Turn on "Send extra output to the warehouse" (Automation tab) and the plant keeps running at full capacity, storing what it cannot sell.', 'Storage costs rent plus a share of the stock\'s value each day. Food, grain and cotton spoil faster. Electricity and services cannot be stored.', 'Sell by hand, or set auto-sell when the price is 10–40% above what you paid. Stock goes back to your company to sell, or to traders at 95% of the price if you do not make it.', 'From level 6, buy stock from the market with standing buy orders.'],
+    how: ['Build one for $400K (each next one costs 80% more) and upgrade it to level 10: +60% space a level. One warehouse holds any mix of products.', 'On a company\'s Overview, "Where your output goes" sends a share of each day\'s output to the warehouse (or turn on "Send extra output to the warehouse" in Automation to store only what it cannot sell).', 'Storage costs about $600 a day in rent plus a share of the stock\'s value. Durable goods lose 0.25% a month, food and crops far more, and anything kept over 3 months loses more each month. Electricity and services cannot be stored.', 'Sell by hand, or set auto-sell when the price is 10–40% above what you paid. Stock goes back to your company to sell, or to traders at 95% of the price if you do not make it.', 'From level 6, buy stock from the market with standing buy orders.'],
     todo: 'Store when prices are low, sell when demand and prices are high.',
   },
   {
@@ -277,6 +330,8 @@ export function Strategies() {
         <p className="text-xs text-dim mt-1">You are level {level}.</p>
       </Card>
 
+      <SectionTitle>Running a real business</SectionTitle>
+      <div className="space-y-2">{RUNNING.map((f) => <FeatureCard key={f.name} f={f} level={level} />)}</div>
       <SectionTitle>Rewards that keep you going</SectionTitle>
       <div className="space-y-2">{REWARDS.map((f) => <FeatureCard key={f.name} f={f} level={level} />)}</div>
 

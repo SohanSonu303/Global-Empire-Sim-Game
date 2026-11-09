@@ -138,7 +138,7 @@ export function createWorld(seed: number, scenario: ScenarioId = 'young', setup?
   const w: WorldState = {
     version: SAVE_VERSION, seed, rng, day: 0, scenario, countryName: 'Republic of Astoria',
     player: {
-      name: 'You', cash: scenario === 'young' ? 400_000 : 10_000_000, xp: 0, level: 1, holdings: {}, reputation: 20,
+      name: 'You', cash: scenario === 'young' ? 600_000 : 10_000_000, xp: 0, level: 1, holdings: {}, reputation: 20,
       realizedPnl: 0, dividendsReceived: 0, lifetimeProfit: 0, netWorthHist: [],
     },
     companies: [], stocks: [], orders: [], macro: createMacro(),
@@ -197,6 +197,7 @@ export function createWorld(seed: number, scenario: ScenarioId = 'young', setup?
     c.assets = st.price - c.cash;
     c.brand = 0.85;
     c.quality = 0.9;
+    c.reach = 0.4; // a small firm with some loyal customers
     w.player.cash -= st.price;
     w.companies.push(c);
   }

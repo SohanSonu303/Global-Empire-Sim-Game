@@ -23,11 +23,37 @@ const unitName = (g: GoodId) => `${GOODS[g].unit} of ${GOODS[g].name.toLowerCase
 // ======================= contracts board =======================
 
 export const BOARD_SIZE = 4;
-/** Contracts (incl. won tenders) one company may run at once */
-export const MAX_JOBS = 2;
+/** Most contracts (incl. won tenders) any company may run at once */
+export const MAX_JOBS = 6;
+/** Share of a plant's daily output that contracts may book; the rest stays for the open market */
+export const JOB_CAP_SHARE = 0.7;
+
+/** Contracts one company may run at once: 2 at first, more as the plant grows (level 3: 3, level 5: 4 ... up to 6) */
+export function maxJobs(c: Company): number {
+  return clamp(1 + Math.ceil(c.level / 2), 2, MAX_JOBS);
+}
 
 export function activeJobs(w: WorldState, companyId: string): number {
   return w.play.jobs.filter((j) => j.status === 'active' && j.companyId === companyId).length;
+}
+
+/** Units per day a company has promised to contracts and tenders */
+export function bookedPerDay(w: WorldState, companyId: string): number {
+  return w.play.jobs.filter((j) => j.status === 'active' && j.companyId === companyId).reduce((s, j) => s + j.qty / Math.max(1, j.days), 0);
+}
+
+/** Why a company can't take on another contract needing `perDay` units a day, or null if it can */
+export function jobRoom(w: WorldState, c: Company, perDay: number): string | null {
+  const max = maxJobs(c);
+  if (activeJobs(w, c.id) >= max) return `${c.name} already has ${max} contracts running${max < MAX_JOBS ? ' (upgrade the plant for more)' : ''}`;
+  const booked = bookedPerDay(w, c.id);
+  const share = c.split ? Math.min(JOB_CAP_SHARE, c.split.contracts) : JOB_CAP_SHARE;
+  if (booked + perDay > c.capacity * share + 1e-6) {
+    return c.split && c.split.contracts < JOB_CAP_SHARE
+      ? `That would book ${fmtPct((booked + perDay) / c.capacity, 0)} of ${c.name}'s output, but your output split gives contracts ${fmtPct(c.split.contracts, 0)}. Raise it on the company's Overview.`
+      : `That would book ${fmtPct((booked + perDay) / c.capacity, 0)} of ${c.name}'s output; contracts can take at most ${fmtPct(JOB_CAP_SHARE, 0)}`;
+  }
+  return null;
 }
 
 function playerCap(w: WorldState, g: GoodId): number {
@@ -45,11 +71,13 @@ function makeJob(w: WorldState): Job | null {
   const buyer = gov ? null : pick(r, users);
   const days = pick(r, [30, 45, 60, 90]);
   const cap = playerCap(w, g) || GOODS[g].baseCapacity;
-  const qty = Math.max(10, Math.round((cap * days * range(r, 0.25, 0.45)) / 10) * 10);
-  const pay = qty * refPrice(w, g) * range(r, 1.15, 1.3);
+  const qty = Math.max(10, Math.round((cap * days * range(r, 0.12, 0.35)) / 10) * 10);
+  // A guaranteed buyer is the main draw: most pay about the market price, rush jobs a little more
+  const rush = days === 30 ? 0.06 : days === 45 ? 0.03 : 0;
+  const pay = qty * refPrice(w, g) * (range(r, 0.97, 1.05) + rush);
   return {
     id: `j${++w.seq}`, source: gov ? 'gov' : 'rival', buyerName: buyer ? buyer.name : pick(r, GOV_BUYERS[g] ?? ['Government of Astoria']),
-    buyerId: buyer?.id, rivalId: buyer?.ownerId, good: g, qty, delivered: 0, pay, bonus: pay * 0.1, penalty: pay * 0.2,
+    buyerId: buyer?.id, rivalId: buyer?.ownerId, good: g, qty, delivered: 0, pay, bonus: pay * 0.05, penalty: pay * 0.25,
     days, deadline: 0, startDay: 0, status: 'offer', offerUntil: w.day + 8,
   };
 }
@@ -60,7 +88,8 @@ export function acceptJob(w: WorldState, jobId: string, companyId: string): Comm
   const c = mine(w).find((x) => x.id === companyId);
   if (!j) return fail('That offer is gone');
   if (!c || c.good !== j.good) return fail(`You need a company that makes ${GOODS[j.good].name.toLowerCase()}`);
-  if (activeJobs(w, c.id) >= MAX_JOBS) return fail(`${c.name} already has ${MAX_JOBS} contracts running`);
+  const full = jobRoom(w, c, j.qty / j.days);
+  if (full) return fail(full);
   j.status = 'active';
   j.companyId = c.id;
   j.startDay = w.day;
@@ -101,7 +130,7 @@ function dailyJobs(w: WorldState): void {
       if (c) c.cash += extra;
       const rv = w.rivals.find((r) => r.id === j.rivalId);
       remember(rv, w, 6, `${c?.name ?? 'You'} delivered a contract on time.`);
-      const xp = 120 + Math.round(Math.min(400, j.pay / 10_000));
+      const xp = 60 + Math.round(Math.min(200, j.pay / 25_000));
       addXpLater(w, xp);
       banner(w, j.early ? 'Contract done early!' : 'Contract done!', `${j.buyerName}: ${fmtMoney(j.pay + extra)}${j.early ? ` incl. ${fmtMoney(extra)} bonus` : ''}`, xp, 'good');
     } else if (w.day > j.deadline || !c || c.bankrupt) {
@@ -199,7 +228,8 @@ export function bidTender(w: WorldState, tenderId: string, companyId: string, pr
   const c = mine(w).find((x) => x.id === companyId);
   if (!t) return fail('That tender has closed');
   if (!c || c.good !== t.good) return fail(`You need a company that makes ${GOODS[t.good].name.toLowerCase()}`);
-  if (activeJobs(w, c.id) >= MAX_JOBS && t.mine?.companyId !== c.id) return fail(`${c.name} already has ${MAX_JOBS} contracts running`);
+  const full = t.mine?.companyId === c.id ? null : jobRoom(w, c, t.qtyPerMonth / 30);
+  if (full) return fail(full);
   t.mine = { companyId, price: clamp(price, t.ref * 0.5, t.ref * 1.5) };
   return ok(`Bid sent: ${fmtPrice(t.mine.price)} per ${GOODS[t.good].unit}`);
 }
@@ -210,7 +240,7 @@ function dailyTenders(w: WorldState): void {
     if (t.status !== 'open' || w.day < t.closes) continue;
     const field = [...t.bids.map((b) => ({ ...b, score: tenderScore(t, b.price, b.quality), player: false }))];
     const me = t.mine && mine(w).find((c) => c.id === t.mine!.companyId);
-    if (me && t.mine && activeJobs(w, me.id) < MAX_JOBS) field.push({ companyId: me.id, name: me.name, price: t.mine.price, quality: me.quality, score: tenderScore(t, t.mine.price, me.quality), player: true });
+    if (me && t.mine && !jobRoom(w, me, t.qtyPerMonth / 30)) field.push({ companyId: me.id, name: me.name, price: t.mine.price, quality: me.quality, score: tenderScore(t, t.mine.price, me.quality), player: true });
     field.sort((a, b) => a.score - b.score);
     const win = field[0];
     if (!win) { t.status = 'closed'; continue; }
@@ -223,8 +253,8 @@ function dailyTenders(w: WorldState): void {
         id: `j${++w.seq}`, source: 'tender', buyerName: t.buyer, good: t.good, qty, delivered: 0, pay: qty * win.price, bonus: 0, penalty: 0,
         days: t.months * 30, startDay: w.day, deadline: w.day + t.months * 30, companyId: me.id, status: 'active', offerUntil: w.day,
       });
-      addXpLater(w, 250);
-      banner(w, 'Tender won!', `${t.buyer} picked ${me.name}: ${qty.toLocaleString()} ${GOODS[t.good].unit} over ${t.months} months at ${fmtPrice(win.price)}`, 250, 'good');
+      addXpLater(w, 150);
+      banner(w, 'Tender won!', `${t.buyer} picked ${me.name}: ${qty.toLocaleString()} ${GOODS[t.good].unit} over ${t.months} months at ${fmtPrice(win.price)}`, 150, 'good');
       addNews(w, 'player', `${me.name} wins the ${t.buyer} tender`, `Worth ${fmtMoney(qty * win.price)} over ${t.months} months.`, 'good', [me.id]);
     } else {
       t.status = t.mine ? 'lost' : 'closed';
@@ -566,6 +596,7 @@ export function resolveStrategyEvent(w: WorldState, ev: PendingEvent, c: Company
     co.assets = total * 0.65;
     co.partners = [{ ownerId: rv.id, name: rv.name, pct: 1 - VENTURE_MINE, paid: total - myPart, day: w.day }];
     seedInputs(w, co, 3);
+    co.reach = 0.45; // your partner brings some of its customers
     w.companies.push(co);
     remember(rv, w, 8, `You built ${name} together.`);
     addNews(w, 'player', `${name} is born`, `A joint venture of you and ${rv.name}: a level ${VENTURE_LEVEL} ${GOODS[g].name.toLowerCase()} plant.`, 'good', [co.id]);

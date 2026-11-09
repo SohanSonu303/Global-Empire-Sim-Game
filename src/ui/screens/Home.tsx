@@ -11,6 +11,7 @@ import { Num } from '../components/game';
 import { IconNews, IconTarget } from '../components/Icons';
 import { playerCompanies } from '../helpers';
 import { runAction, useAdvice } from '../advice';
+import { openCards } from '../../engine/inbox';
 
 export function HomeScreen() {
   const w = useGame((s) => s.world)!;
@@ -38,6 +39,7 @@ export function HomeScreen() {
         </div>
 
         <Assistant />
+        <InboxCard />
 
         {w.player.level < 4 && (
           <Card className="mt-3 p-3 border-gold/50 bg-gradient-to-r from-gold/15 to-card" onClick={() => push({ screen: 'guide' })}>
@@ -117,6 +119,30 @@ function Assistant() {
           {all ? 'Show less' : `Show all ${advice.length}`}
         </button>
       )}
+    </Card>
+  );
+}
+
+/** This month's decisions, one tap away */
+function InboxCard() {
+  const w = useGame((s) => s.world)!;
+  const push = useGame((s) => s.push);
+  const open = openCards(w);
+  if (!playerCompanies(w).length) return null;
+  const soon = open.length ? Math.min(...open.map((x) => x.expires - w.day)) : 99;
+  return (
+    <Card className={cx('mt-3 p-3', open.length > 0 && soon <= 2 && 'border-amber/60')} onClick={() => push({ screen: 'inbox' })}>
+      <div className="flex items-center gap-3">
+        <span className="relative grid place-items-center size-10 shrink-0 rounded-full bg-card-2 border border-line text-lg" aria-hidden>
+          📥
+          {open.length > 0 && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red text-white text-[11px] font-bold grid place-items-center">{open.length}</span>}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold">Inbox</div>
+          <div className="text-xs text-muted truncate">{open.length ? open[0].title : 'No decisions waiting this month'}</div>
+        </div>
+        <span className="text-gold font-bold text-sm">{open.length ? 'Decide' : 'Open'}</span>
+      </div>
     </Card>
   );
 }

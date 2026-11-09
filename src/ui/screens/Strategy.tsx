@@ -4,12 +4,12 @@ import { GOODS, GOOD_IDS } from '../../engine/data';
 import { refPrice } from '../../engine/company';
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import { unlockLevel, unlocked, type UnlockKey } from '../../engine/rewards';
-import { tenderScore } from '../../engine/strategy';
+import { JOB_CAP_SHARE, MAX_JOBS, activeJobs, bookedPerDay, jobRoom, maxJobs, tenderScore } from '../../engine/strategy';
 import { WORKING_SHARE, auctionCompany, minBid, plantValue, playerBlock, rivalValuation } from '../../engine/auctions';
 import {
-  MAX_WAREHOUSE_LEVEL, buildCost, dailyCost, premiumPrice, rivalBuyers, roomFor, spaceOf, spacePer, spoilRate, storable, upgradeCostOf, usedSpace,
+  FRESH_MONTHS, MAX_WAREHOUSE_LEVEL, ageMult, openDeals, openJobs, sendRoom, buildCost, dailyCost, monthsStored, premiumPrice, rivalBuyers, roomFor, runningCost, spaceOf, spacePer, spoilMonth, storable, upgradeCostOf, usedSpace,
 } from '../../engine/warehouse';
-import type { Auction, GoodId, Job, Tender, Warehouse, WorldState } from '../../engine/types';
+import type { Auction, GoodId, Job, StockDest, Tender, Warehouse, WorldState } from '../../engine/types';
 import { Badge, Button, Card, Chips, Progress, Screen, SectionTitle, cx } from '../components/core';
 import { SubHeader } from './More';
 import { Row, Slider } from './Company';
@@ -73,7 +73,7 @@ function Contracts({ w }: { w: WorldState }) {
   const past = jobs.filter((j) => j.status === 'done' || j.status === 'failed').slice(-5).reverse();
   return (
     <>
-      <Intro>Deliver a quantity by a deadline for a fixed price above market. Finish early for a bonus; miss it and you pay a penalty. Deliveries come out of your stock before normal sales, then from your warehouses.</Intro>
+      <Intro>Deliver a quantity by a deadline for a fixed price, usually close to the market price (rush jobs pay a little more). The draw is a guaranteed buyer: the price is locked even if the market falls. Finish early for a small bonus; miss it and you pay a penalty. A company runs 2 contracts at first and more as you upgrade it (up to {MAX_JOBS}), and contracts can book at most {fmtPct(JOB_CAP_SHARE, 0)} of its output.</Intro>
       {active.length > 0 && <SectionTitle>Active</SectionTitle>}
       <div className="space-y-2">{active.map((j) => <JobCard key={j.id} w={w} j={j} />)}</div>
       <SectionTitle>Offers</SectionTitle>
@@ -94,6 +94,8 @@ function JobCard({ w, j }: { w: WorldState; j: Job }) {
   const [pick, setPick] = useState(cos[0]?.id ?? '');
   const dailyCap = cos.reduce((s, c) => s + c.capacity, 0);
   const need = j.qty / j.days;
+  const chosen = cos.find((c) => c.id === pick) ?? cos[0];
+  const room = chosen ? jobRoom(w, chosen, need) : null;
   return (
     <Card className="p-3">
       <div className="flex items-start gap-2">
@@ -125,9 +127,15 @@ function JobCard({ w, j }: { w: WorldState; j: Job }) {
                   {cos.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
-              <Button size="sm" className="flex-1" onClick={() => dispatch({ type: 'acceptJob', jobId: j.id, companyId: pick })}>Accept</Button>
+              <Button size="sm" className="flex-1" disabled={!!room} onClick={() => dispatch({ type: 'acceptJob', jobId: j.id, companyId: chosen!.id })}>Accept</Button>
             </div>
           )}
+          {chosen && (
+            <div className="text-xs text-dim mt-1">
+              {chosen.name}: {activeJobs(w, chosen.id)}/{maxJobs(chosen)} contracts · {fmtPct(bookedPerDay(w, chosen.id) / chosen.capacity, 0)} of output booked
+            </div>
+          )}
+          {room && <div className="text-xs text-amber mt-1">{room}</div>}
           {cos.length > 0 && need > dailyCap * 0.8 && <div className="text-xs text-amber mt-1">That is {fmtPct(need / dailyCap, 0)} of your daily capacity: it will eat into normal sales.</div>}
         </div>
       )}
@@ -282,10 +290,10 @@ function Warehouses({ w }: { w: WorldState }) {
   const cost = buildCost(w);
   return (
     <>
-      <Intro>Store extra output, or stock you buy from the market, and sell it later when prices are higher. Storage costs money every day and food, grain and cotton spoil. Electricity and services cannot be stored.</Intro>
+      <Intro>One warehouse holds <b>any mix of products</b>: what your factories send (set the Warehouse share in a company's "Where your output goes"), and from level 6 anything you buy from the market. Sell when prices rise. Warehouses are expensive to build and run, stock costs money to keep, and it slowly goes to waste: durable goods lose 0.25% a month, food and crops much more, and anything kept over {FRESH_MONTHS} months loses more each month. Electricity and services cannot be stored.</Intro>
       <div className="space-y-2 mt-2">{w.play.warehouses.map((wh) => <WarehouseCard key={wh.id} w={w} wh={wh} />)}</div>
       <Button block className="mt-3" disabled={w.player.cash < cost} onClick={() => dispatch({ type: 'buildWarehouse' })}>🏗️ Build {w.play.warehouses.length ? 'another' : 'a'} warehouse · {fmtMoney(cost)}</Button>
-      <p className="text-xs text-dim mt-2">Each new warehouse costs more than the last. Turn on "Send extra output to the warehouse" in a company's Automation tab.</p>
+      <p className="text-xs text-dim mt-2">Each new warehouse costs 80% more than the last, plus about {fmtMoney(runningCost({ level: 1 } as Warehouse))} a day in rent and staff and a small charge on the stock's value.</p>
     </>
   );
 }
@@ -314,7 +322,7 @@ function WarehouseCard({ w, wh }: { w: WorldState; wh: Warehouse }) {
       <div className="mt-3">
         <div className="flex justify-between text-xs"><span className="text-muted">Space used</span><span className="num font-semibold">{fmtPct(used / total, 0)}</span></div>
         <Progress value={used / total} height={10} tone={used / total > 0.9 ? 'red' : 'gold'} />
-        <p className="text-[11px] text-dim mt-1">All products share this space. Each one also has its own limit, so one product cannot fill the whole warehouse.</p>
+        <p className="text-[11px] text-dim mt-1">All products share this one space. Tap a product to cap how much of it one product may take.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-2 mt-3">
@@ -367,11 +375,54 @@ function StockTile({ w, wh, g, active, onClick }: { w: WorldState; wh: Warehouse
       </div>
       <div className="mt-1.5 flex items-baseline gap-1">
         <span className="num text-lg font-black">{compact(qty)}</span>
-        <span className="num text-xs text-muted">/ {compact(max)} {GOODS[g].unit}</span>
+        <span className="num text-xs text-muted">{GOODS[g].unit} · {fmtPct(usedSpace(wh, g) / spaceOf(wh), 0)} of space</span>
       </div>
-      <Progress value={max > 0 ? qty / max : 0} height={6} tone={full ? 'red' : qty / Math.max(1, max) > 0.75 ? 'amber' : 'green'} />
+      <Progress value={usedSpace(wh, g) / spaceOf(wh)} height={6} tone={full ? 'red' : qty / Math.max(1, max) > 0.75 ? 'amber' : 'green'} />
       {full && qty < max * 0.98 && <div className="text-[10px] text-red mt-0.5">Warehouse full</div>}
     </button>
+  );
+}
+
+const DESTS: { id: StockDest; label: string; icon: string }[] = [
+  { id: 'market', label: 'Market', icon: '🛒' },
+  { id: 'contracts', label: 'Contracts', icon: '📋' },
+  { id: 'deals', label: 'Deals', icon: '🤝' },
+];
+
+/** Send stored stock to the market, your open contracts or your supply deals */
+function SendStock({ w, wh, g, qty, own }: { w: WorldState; wh: Warehouse; g: GoodId; qty: number; own?: string }) {
+  const dispatch = useGame((s) => s.dispatch);
+  const [to, setTo] = useState<StockDest>('market');
+  const room = sendRoom(w, g, to);
+  const jobs = openJobs(w, g);
+  const deals = openDeals(w, g);
+  const unit = GOODS[g].unit;
+  const note = to === 'market'
+    ? (own ? `Goes to ${own} to sell at its price.` : 'Sold to traders now at 95% of the market price.')
+    : to === 'contracts'
+      ? (jobs.length ? `Delivered now to ${jobs.length} open contract${jobs.length > 1 ? 's' : ''} (soonest deadline first), paid at the contract price. They still need ${Math.round(room).toLocaleString()} ${unit}.` : 'No open contract needs this. Take one on the Contracts tab.')
+      : (deals.length ? `Set aside for ${deals.length} deal${deals.length > 1 ? 's' : ''} and delivered first each day at the deal price, so your plant sells more on the market. Room for ${Math.round(room).toLocaleString()} ${unit}.` : 'You have no supply deal selling this. Sign one from a company\'s Supply tab.');
+  return (
+    <div className="mt-2 rounded-lg border border-line p-2.5">
+      <div className="text-sm font-semibold">Send stock to</div>
+      <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+        {DESTS.map((d) => (
+          <button key={d.id} onClick={() => setTo(d.id)} aria-pressed={to === d.id}
+            className={cx('rounded-lg border py-1.5 text-xs font-semibold', to === d.id ? 'border-gold bg-gold text-gold-ink' : 'border-line bg-card')}>
+            <span aria-hidden>{d.icon}</span> {d.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted mt-1.5">{note}</p>
+      <div className="grid grid-cols-3 gap-2 mt-2">
+        {[0.25, 0.5, 1].map((f) => (
+          <Button key={f} size="sm" variant="dark" disabled={room < 1}
+            onClick={() => dispatch(to === 'market' ? { type: 'releaseStock', id: wh.id, good: g, qty: qty * f } : { type: 'sendStock', id: wh.id, good: g, qty: Math.min(qty, room) * f, to })}>
+            {f === 1 ? (to === 'market' || room >= qty ? 'All' : 'Max') : `${f * 100}%`}
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -404,15 +455,9 @@ function StockPanel({ w, wh, g }: { w: WorldState; wh: Warehouse; g: GoodId }) {
             onChange={(e) => cos.forEach((c) => dispatch({ type: 'setAutomation', companyId: c.id, automation: { toWarehouse: e.target.checked } }))} />
         </label>
       )}
-      <Slider label={`Limit: up to ${Math.round(maxUnits(wh, g)).toLocaleString()} ${GOODS[g].unit} (share of space)`} value={Math.round(limit * 100)} min={10} max={100} step={5} suffix="%" onCommit={(v) => dispatch({ type: 'setWarehouseLimit', id: wh.id, good: g, share: v / 100 })} />
-      <div className="text-xs text-muted">Loses {fmtPct(spoilRate(g), 2)} a day in storage. {own ? `Sold stock goes to ${own.name} to sell.` : 'You do not make this, so sold stock goes to traders at 95% of the market price.'}</div>
-      {st && (
-        <div className="grid grid-cols-3 gap-2 mt-2">
-          {[0.25, 0.5, 1].map((f) => (
-            <Button key={f} size="sm" variant="dark" onClick={() => dispatch({ type: 'releaseStock', id: wh.id, good: g, qty: st.qty * f })}>Sell {f === 1 ? 'all' : `${f * 100}%`}</Button>
-          ))}
-        </div>
-      )}
+      <Slider label={`Most of the space ${GOODS[g].name.toLowerCase()} may take: ${Math.round(maxUnits(wh, g)).toLocaleString()} ${GOODS[g].unit}`} value={Math.round(limit * 100)} min={10} max={100} step={5} suffix="%" onCommit={(v) => dispatch({ type: 'setWarehouseLimit', id: wh.id, good: g, share: v / 100 })} />
+      <div className="text-xs text-muted">Goes to waste: {fmtPct(spoilMonth(g), 2)} a month while fresh{st && monthsStored(w, st) > FRESH_MONTHS ? <>, <b className="text-amber">now {fmtPct(spoilMonth(g) * ageMult(monthsStored(w, st)), 2)} a month</b> (stored about {Math.round(monthsStored(w, st))} months)</> : `, more after ${FRESH_MONTHS} months`}. {own ? `Sold stock goes to ${own.name} to sell.` : 'You do not make this, so sold stock goes to traders at 95% of the market price.'}</div>
+      {st && <SendStock w={w} wh={wh} g={g} qty={st.qty} own={own?.name} />}
       <div className="text-sm font-semibold mt-1">Auto-sell</div>
       <div className="flex gap-2 mt-1 flex-wrap">
         {[undefined, 0.1, 0.2, 0.4].map((a) => (

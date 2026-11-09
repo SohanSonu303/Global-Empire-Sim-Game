@@ -1,3 +1,4 @@
+import { hireStaff } from './business';
 import { GOODS, INDUSTRIES, LEVEL_CAP_MULT, MAX_LEVEL, UPGRADE_COST_GROWTH, maxPriceMult, requiredCapital, startCost, upgradeCost } from './data';
 import { foundPrice, noteOpsSaved, swapTrait } from './traits';
 import { buyLicence, grantLicence, grantPermit, hasLicence, licenceFee, licences, permitFee } from './licences';
@@ -11,11 +12,14 @@ import { addNews, fmtMoney } from './news';
 import { addXp, claimGoal, netWorth } from './progress';
 import { checkIn } from './rewards';
 import { acceptJob, bidTender, endWar, startCampaign } from './strategy';
-import { buildWarehouse, releaseStock, setBuyOrder, setLimit, setSellRule, sellToRivals, upgradeWarehouse } from './warehouse';
+import { buildWarehouse, releaseStock, setBuyOrder, setLimit, setSellRule, setSplit as setSplitCmd, sellToRivals, sendStock, upgradeWarehouse } from './warehouse';
 import { newCompany, seedInputs } from './world';
 import { COVER, premiumPerDay } from './disasters';
 import { explore } from './resources';
 import { bidAuction } from './auctions';
+import { answerInbox } from './inbox';
+import { rivalNotices } from './rivalry';
+import { MAINT, MANAGERS, NEW_REACH, NEW_SKILL } from './company';
 import type { Command, CommandResult, Company, Order, WorldState } from './types';
 
 const ok = (message: string): CommandResult => ({ ok: true, message });
@@ -67,7 +71,12 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       seedInputs(w, c, 2); // a starter delivery of inputs comes with the plant
       if (cmd.priceMult) c.priceMult = Math.max(0.5, Math.min(maxPriceMult(cmd.good), cmd.priceMult));
       if (partner) addFoundingPartner(w, c, partner.id, partner.pct, partner.paid);
+      // A new business starts with few customers and a green team
+      c.reach = def.reg ? 0.9 : NEW_REACH; // people who need care go where the beds are
+      c.satisfaction = 0.75;
+      c.skill = NEW_SKILL;
       w.companies.push(c);
+      rivalNotices(w, c);
       w.macro.capexMonth += plant * 0.65;
       ensureBanks(w);
       addNews(w, 'player', `${name} opens its doors`, `A new ${def.name.toLowerCase()} producer enters the Astoria market.${permit ? ` The government permit cost ${fmtMoney(permit)}.` : ''}${partner ? ` ${c.partners?.[0]?.name} put in ${fmtMoney(partner.paid)} for ${Math.round(partner.pct * 100)}%.` : ''}`, 'good', [c.id]);
@@ -111,7 +120,7 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
         const cost = n * salaryOf(c) * 5 * wageIndex(w);
         if (c.cash < cost) return fail(`Hiring costs ${fmtMoney(cost)} of company cash`);
         c.cash -= cost;
-        c.workers += n;
+        hireStaff(c, n);
         return ok(`Hired ${n} staff`);
       }
       if (n < 0) {
@@ -150,6 +159,11 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       c.automation.minCash = Math.max(0, c.automation.minCash);
       c.automation.supplyDays = clamp(c.automation.supplyDays ?? 4, 1, 20);
       return ok('Automation updated');
+    }
+    case 'setSplit': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      return setSplitCmd(w, c, cmd.split);
     }
     case 'borrow': {
       const c = myCompany(w, cmd.companyId);
@@ -294,6 +308,8 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       return upgradeWarehouse(w, cmd.id);
     case 'setWarehouseLimit':
       return setLimit(w, cmd.id, cmd.good, cmd.share);
+    case 'sendStock':
+      return sendStock(w, cmd.id, cmd.good, cmd.qty, cmd.to);
     case 'releaseStock':
       return releaseStock(w, cmd.id, cmd.good, cmd.qty);
     case 'setBuyOrder':
@@ -319,6 +335,22 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
     }
     case 'bidAuction':
       return bidAuction(w, cmd.auctionId, cmd.amount);
+    case 'answerInbox':
+      return answerInbox(w, cmd.cardId, cmd.choiceId);
+    case 'setMaintenance': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      if (!MAINT[cmd.level]) return fail('Unknown level');
+      c.maintenance = cmd.level;
+      return ok(`Maintenance set to ${MAINT[cmd.level].label.toLowerCase()}`);
+    }
+    case 'setManager': {
+      const c = myCompany(w, cmd.companyId);
+      if (!c) return fail('Company not found');
+      if (!MANAGERS[cmd.manager]) return fail('Unknown manager');
+      c.manager = cmd.manager;
+      return ok(cmd.manager === 'none' ? `You run ${c.name} yourself now` : `${MANAGERS[cmd.manager].label} hired for ${c.name}`);
+    }
     case 'seenAchievement': {
       const a = w.achievements.find((x) => x.id === cmd.id);
       if (a) a.seen = true;

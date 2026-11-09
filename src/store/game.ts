@@ -20,7 +20,8 @@ export type Route =
   | { screen: 'chain'; good?: GoodId }
   | { screen: 'article'; id: string }
   | { screen: 'strategy'; tab?: StrategyTab }
-  | { screen: 'reports' };
+  | { screen: 'reports' }
+  | { screen: 'inbox' };
 
 export type StrategyTab = 'contracts' | 'auctions' | 'tenders' | 'warehouses' | 'wars' | 'tips';
 

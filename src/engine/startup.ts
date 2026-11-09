@@ -4,7 +4,7 @@
  * profit and loss statement. An investor buys 51% after a strict technical pitch, then reviews you
  * every 4 weeks against a target and their own rule. Reach $500K and they buy you out.
  */
-import { GOODS, startCost } from './data';
+import { BUILD_COST_MULT, GOODS, startCost } from './data';
 import type { GoodId, TraitId } from './types';
 import { chance, createRng, next, pick, range, type RngState } from './rng';
 
@@ -174,26 +174,26 @@ const Q = (q: string, right: string, wrong: string[], why: string): PitchQuestio
 export const PITCH_FINANCE: PitchQuestion[] = [
   Q('Revenue is $200K, cost of goods $120K and operating costs $50K. What is your operating margin?', '15%', ['40%', '25%', '30%'],
     '$200K − $120K − $50K = $30K operating profit. $30K ÷ $200K = 15%.'),
-  Q('An investor puts in $1M for 20% of your company. What is the post-money valuation?', '$5M', ['$4M', '$1.2M', '$20M'],
-    'Post-money = investment ÷ share bought = $1M ÷ 20% = $5M. The pre-money value was $4M.'),
+  Q('An investor pays $50K for half (50%) of your company. What is the whole company worth?', '$100K', ['$50K', '$25K', '$150K'],
+    'If half is worth $50K, the whole company is worth $50K × 2 = $100K.'),
   Q('Your pre-money valuation is $4M and an investor adds $1M. What share do they get?', '20%', ['25%', '80%', '4%'],
     'Post-money = $4M + $1M = $5M. Their share = $1M ÷ $5M = 20%.'),
   Q('You borrow $100K at 12% a year and pay interest only. What is the interest each month?', '$1,000', ['$12,000', '$1,200', '$100'],
     '$100K × 12% = $12,000 a year. ÷ 12 months = $1,000 a month.'),
   Q('You have $300K in the bank and lose $25K a month. What is your runway?', '12 months', ['25 months', '3 months', '7.5 months'],
     'Runway = cash ÷ monthly burn = $300K ÷ $25K = 12 months.'),
-  Q('What is EBITDA?', 'Earnings before interest, taxes, depreciation and amortisation', ['Cash in the bank minus debt', 'Revenue minus cost of goods only', 'Profit after all taxes'],
-    'EBITDA shows how much the operations earn before financing, tax and the cost of wearing out equipment.'),
-  Q('A customer pays $40 a month at a 75% gross margin and stays 20 months. What is their lifetime gross profit (LTV)?', '$600', ['$800', '$30', '$1,600'],
-    '$40 × 75% = $30 gross profit a month. × 20 months = $600.'),
+  Q('What is profit?', 'What is left from sales after paying all the costs', ['All the money customers pay you', 'The cash in your bank', 'The money you borrow'],
+    'Profit = sales − costs. Sales (revenue) is what customers pay before any costs come out.'),
+  Q('A customer pays $30 a month and stays for 10 months. How much do they pay you in total?', '$300', ['$30', '$40', '$3,000'],
+    '$30 × 10 months = $300. This is the customer’s lifetime value.'),
   Q('Each customer is worth $600 (LTV) and costs $200 to win (CAC). What does that tell you?', 'LTV:CAC is 3:1, a healthy business', ['LTV:CAC is 1:3, you lose money', 'You lose $400 per customer', 'It needs to be 10:1 to work'],
     '$600 ÷ $200 = 3. A ratio of 3 or more is the usual target for a healthy business.'),
-  Q('Customers pay you after 60 days, but you pay suppliers after 30. What happens when sales grow fast?', 'You need more cash: unpaid invoices tie up money (working capital)', ['Profit falls', 'Nothing, only profit matters', 'Suppliers start paying you'],
-    'You pay out before you collect, so faster growth means more cash stuck in invoices. Profitable companies can still run out of cash this way.'),
+  Q('Customers pay you a month late, but you pay your staff today. What can happen?', 'You can run short of cash even while making a profit', ['Nothing, only profit matters', 'Your profit doubles', 'Staff wait for the customers'],
+    'Cash leaves before it comes in, so even a profitable company needs some money in the bank.'),
   Q('You invest $100K and it returns $30K a year. What is the simple payback period?', 'About 3.3 years', ['5 years', '1.5 years', '30 years'],
     'Payback = investment ÷ yearly return = $100K ÷ $30K ≈ 3.3 years.'),
-  Q('Revenue grows 10% every month for 12 months. Roughly how much bigger is it?', 'About 3.1×', ['2.2×', '1.2×', '12×'],
-    'Growth compounds: 1.1¹² ≈ 3.14. Adding 12 × 10% (2.2×) forgets that each month grows on the last.'),
+  Q('Sales grew from $10K last month to $12K this month. What is the growth?', '20%', ['2%', '12%', '120%'],
+    'Growth = (new − old) ÷ old = ($12K − $10K) ÷ $10K = 20%.'),
   Q('Fixed costs are $60K a month. You sell at $50 and each unit costs $20 to make. How many units a month to break even?', '2,000', ['1,200', '3,000', '857'],
     'Each unit leaves $50 − $20 = $30. $60K ÷ $30 = 2,000 units.'),
 ];
@@ -227,12 +227,12 @@ export const PITCHES: Record<IdeaId, PitchQuestion[]> = {
       'Churn is a quality problem. Ads only refill a leaking bucket.'),
     Q('What happens to your computing bill as you grow?', 'It grows with every customer: it is a variable cost', ['It stays the same: it is a fixed cost', 'It shrinks', 'It is paid by the customers directly'],
       'Costs that rise with each unit sold are variable costs. Price must stay above them.'),
-    Q('You serve 2 million requests a day at $0.002 of computing each. What is the daily computing bill?', '$4,000', ['$400', '$40,000', '$2,000'],
-      '2,000,000 × $0.002 = $4,000 a day.'),
+    Q('Each request costs $0.01 of computing and you serve 100,000 a day. What is the daily computing bill?', '$1,000', ['$100', '$10,000', '$10'],
+      '100,000 × $0.01 = $1,000 a day.'),
     Q('What is "inference" in an AI product?', 'Running the trained model to answer a user’s request', ['Training the model on data', 'Labelling data by hand', 'Buying GPUs'],
       'Training happens once (or rarely). Inference runs for every request, so it drives your variable cost.'),
-    Q('Your GPUs are busy 40% of the time. If you raise that to 80%, what happens to the computing cost per request?', 'It halves', ['It doubles', 'It stays the same', 'It falls by 80%'],
-      'You pay for the GPUs either way. Twice the requests on the same hardware = half the cost per request.'),
+    Q('You have 100 customers paying $50 a week. What is your weekly revenue?', '$5,000', ['$500', '$150', '$50,000'],
+      '100 × $50 = $5,000 a week.'),
     Q('Why do most AI startups fine-tune an existing model instead of training one from scratch?', 'Far less cost and time for a model that is good at your task', ['Fine-tuned models need no computing', 'Training from scratch is illegal', 'It is always more accurate'],
       'Training a large model costs millions. Fine-tuning adapts an existing one to your data for a tiny fraction.'),
     Q('Monthly churn is 5%. Roughly how long does an average customer stay?', '20 months', ['5 months', '12 months', '95 months'],
@@ -251,10 +251,10 @@ export const PITCHES: Record<IdeaId, PitchQuestion[]> = {
       'Retention measures how many players return. Low day-30 retention means the game does not hold people.'),
     Q('A free game has 100,000 daily players. 2% buy something each day, spending $5 on average. What is the daily revenue?', '$10,000', ['$2,000', '$500,000', '$100,000'],
       '100,000 × 2% = 2,000 buyers × $5 = $10,000.'),
-    Q('What does ARPDAU mean?', 'Average revenue per daily active user', ['Annual revenue per download', 'Average reviews per day', 'Active players per update'],
-      'ARPDAU = daily revenue ÷ daily players. With the numbers above: $10,000 ÷ 100,000 = $0.10.'),
-    Q('Your game engine charges 5% of revenue above the first $1M. The game earns $3M. What is the fee?', '$100,000', ['$150,000', '$50,000', '$0'],
-      'Only the $2M above $1M is charged: 5% × $2M = $100,000.'),
+    Q('You sell 1,000 copies at $10 each. What are your sales before the store’s cut?', '$10,000', ['$1,000', '$100,000', '$1,010'],
+      '1,000 × $10 = $10,000.'),
+    Q('Why release updates after launch?', 'New content brings players back and sells more copies', ['Updates are required by law', 'They make the game cheaper to run', 'Players never notice them'],
+      'Sales fade after launch. Updates give players a reason to return and tell friends.'),
   ],
   chips: [
     Q('How does a chip design (IP) company make money?', 'Licence fees plus a royalty on every chip sold', ['Making chips in its own factory', 'Advertising', 'Selling raw silicon'],
@@ -267,12 +267,12 @@ export const PITCHES: Record<IdeaId, PitchQuestion[]> = {
       'Tape-out is the big milestone: after it, changes are slow and very expensive.'),
     Q('A wafer holds 500 chips and the yield is 80%. How many good chips per wafer?', '400', ['500', '80', '420'],
       'Yield is the share that works: 500 × 80% = 400.'),
-    Q('What does a smaller process node (say 3 nm instead of 7 nm) usually give?', 'More transistors in the same space: faster and less power, but costlier to make', ['Bigger, cheaper chips', 'No change at all', 'Slower chips that use more power'],
-      'Smaller transistors pack more logic per area, but the masks and factories cost far more.'),
+    Q('A licensee pays you $900 a week. You have 5 of them. What is your weekly revenue?', '$4,500', ['$900', '$9,000', '$905'],
+      '5 × $900 = $4,500 a week.'),
     Q('What is a "fabless" chip company?', 'One that designs chips and pays a foundry to manufacture them', ['One with no designers', 'One that only sells used chips', 'One that makes chips without silicon'],
       'Fabless firms avoid the billions a factory costs and pay a foundry per wafer instead.'),
-    Q('A licensee sells 1 million chips at $50 and pays you a 2% royalty. How much do you earn?', '$1,000,000', ['$100,000', '$50,000', '$10,000,000'],
-      '1,000,000 × $50 = $50M of chip sales. 2% of $50M = $1M.'),
+    Q('A licensee sells 10,000 chips and pays you $2 for each. How much do you earn?', '$20,000', ['$2,000', '$10,000', '$200,000'],
+      '10,000 × $2 = $20,000. This per-chip fee is called a royalty.'),
   ],
   energy: [
     Q('Where does early money usually come from?', 'Government grants and paid pilot projects', ['Selling power to homes', 'Advertising', 'Selling shares to the public'],
@@ -281,12 +281,12 @@ export const PITCHES: Record<IdeaId, PitchQuestion[]> = {
       'Expected value = chance × prize = 50% × $40,000.'),
     Q('Each engineer can run 2.5 pilots. You have 2 engineers and 7 power companies want a pilot. What do you do?', 'Hire: you can only serve 5 pilots', ['Sign all 7 and hope', 'Cut your price', 'Turn everyone away'],
       'Capacity = 2 × 2.5 = 5. Customers you cannot serve leave and hurt your name.'),
-    Q('A 10 MW solar farm has a 25% capacity factor. How much energy does it make in a year (8,760 hours)?', '21,900 MWh', ['87,600 MWh', '2,190 MWh', '25,000 MWh'],
-      '10 MW × 8,760 h × 25% = 21,900 MWh. Capacity factor is the share of the maximum the plant really produces.'),
+    Q('Why does a solar panel make less power than its maximum over a year?', 'The sun is not always shining: nights, clouds and winter', ['Panels switch off on weekends', 'The grid only takes half', 'It always makes its maximum'],
+      'A panel only produces at full power in strong sun, so its yearly output is well below the maximum.'),
     Q('What is a PPA (power purchase agreement)?', 'A long contract where a buyer agrees to buy your power at a set price', ['A government safety permit', 'A loan for solar panels', 'A share of the power grid'],
       'PPAs lock in revenue for 10–20 years, which makes banks willing to lend for the plant.'),
-    Q('What does LCOE measure?', 'The average cost of producing each MWh over the plant’s whole life', ['The price of power on one day', 'How much carbon the plant saves', 'The cost of the land'],
-      'Levelised cost of energy spreads building and running costs over every MWh produced, so different plants can be compared.'),
+    Q('A solar farm costs $1M to build and earns $200K a year. How long until it pays for itself?', '5 years', ['2 years', '20 years', '1 year'],
+      'Payback = cost ÷ yearly earnings = $1M ÷ $200K = 5 years.'),
     Q('You sell 20,000 MWh a year at $50 per MWh. What is the yearly revenue?', '$1,000,000', ['$100,000', '$10,000,000', '$400,000'],
       '20,000 × $50 = $1,000,000.'),
     Q('Why do solar and wind farms add batteries?', 'To store power and sell it when the sun or wind is gone, often at higher prices', ['Batteries make the panels produce more', 'The law always requires it', 'To avoid paying for land'],
@@ -294,6 +294,8 @@ export const PITCHES: Record<IdeaId, PitchQuestion[]> = {
   ],
 };
 
+/** Wrong answers an investor forgives in one pitch */
+export const PITCH_MISSES_ALLOWED = 1;
 /** How many questions an investor asks: two on finance and three on the business itself. */
 export const PITCH_FINANCE_ASKED = 2;
 export const PITCH_IDEA_ASKED = 3;
@@ -327,7 +329,7 @@ export const INVEST_AMOUNT: Record<IdeaId, number> = { freelance: 40_000, ai: 11
 
 export interface PitchResult { pass: boolean; correct: number; total: number; amount: number; verdict: string; misses: { q: string; why: string }[]; offTopic: boolean }
 
-/** answers[i] is the index into questions[i].options. All answers must be right. */
+/** answers[i] is the index into questions[i].options. One wrong answer is forgiven. */
 export function pitchResult(idea: IdeaId, investor: InvestorId, questions: PitchQuestion[], answers: number[]): PitchResult {
   const inv = INVESTORS[investor];
   if (!inv.likes.includes(idea)) {
@@ -336,10 +338,10 @@ export function pitchResult(idea: IdeaId, investor: InvestorId, questions: Pitch
   }
   const misses = questions.flatMap((q, i) => (q.options[answers[i]]?.ok ? [] : [{ q: q.q, why: q.why }]));
   const correct = questions.length - misses.length;
-  const pass = misses.length === 0;
+  const pass = misses.length <= PITCH_MISSES_ALLOWED;
   return {
     pass, correct, total: questions.length, offTopic: false, misses, amount: pass ? INVEST_AMOUNT[idea] : 0,
-    verdict: pass ? 'You know your numbers. I am in.' : correct === questions.length - 1 ? 'Close, but I do not invest in founders who get the numbers wrong. Study them and come back.' : 'You do not understand your own business yet. No deal.',
+    verdict: pass ? (misses.length ? 'One slip, but you know your business. I am in.' : 'You know your numbers. I am in.') : correct === questions.length - 2 ? 'Close, but two wrong answers is too many. Study them and come back.' : 'You do not understand your own business yet. No deal.',
   };
 }
 export interface StartupEvent { id: string; title: string; body: string; choices: { id: string; label: string; detail: string }[] }
@@ -357,6 +359,8 @@ export interface WeekReport {
   marketing: number;
   rd: number;
   interest: number;
+  /** Fees, royalties and sales cuts paid to partners */
+  partners?: number;
   side: number;
   profit: number;
   newCustomers: number;
@@ -394,6 +398,10 @@ export interface Startup {
   rd: number;
   team: number;
   side: boolean;
+  /** Licence a bigger company's tech: the product builds faster and is better, for a fee then a royalty */
+  techPartner?: boolean;
+  /** A bigger company sells you to its customers, for a cut of your sales */
+  salesPartner?: boolean;
   // state
   reach: number;
   quality: number;
@@ -428,8 +436,8 @@ export function newStartup(seed: number, idea: IdeaId, name: string, investor: I
   s.price = e.ref;
   s.reach = e.startReach;
   s.launched = !e.needsLaunch;
-  s.marketing = Math.round(e.reachCost * 10 / 50) * 50;
-  s.rd = e.needsLaunch ? 1000 : 0;
+  s.marketing = marketingBudgetFor(s, 'low');
+  s.rd = e.needsLaunch ? rdBudgetFor(s, 'normal') : 0;
   s.values = [value(s)];
   s.log.unshift({ week: 0, text: `${INVESTORS[investor].name} invests ${money(invested)} for ${Math.round(INVESTOR_PCT * 100)}% of ${s.name}. Goal: ${money(GOAL_VALUE)} by week ${DEADLINE_WEEK}.`, tone: 'good' });
   return s;
@@ -462,7 +470,7 @@ export function trailing(s: Startup, key: keyof WeekReport, n = VALUE_WEEKS): nu
 
 export function weeklyCosts(s: Startup): number {
   const e = econOf(s);
-  return (s.team - 1) * e.salary + e.rent + s.marketing + s.rd + s.debt * WEEKLY_RATE;
+  return (s.team - 1) * e.salary + e.rent + s.marketing + s.rd + s.debt * WEEKLY_RATE + (s.techPartner ? techFee(s) : 0);
 }
 
 export function runway(s: Startup): number {
@@ -524,10 +532,12 @@ export function lesson(s: Startup): { tone: 'good' | 'warn' | 'bad'; text: strin
   if (runway(s) < 6) return { tone: 'bad', text: `Only about ${Math.floor(runway(s))} weeks of cash left. Cut spending, take side work or borrow.` };
   if (!s.launched) {
     if (s.progress >= 100) return { tone: 'good', text: 'The product is ready. Launch when your hype (people reached) is high.' };
+    if (e.model === 'copies' && s.progress >= 50 && s.marketing < marketingBudgetFor(s, 'high')) return { tone: 'warn', text: `Games sell most in launch week. Set marketing to High (${money(marketingBudgetFor(s, 'high'))} a week) now so lots of people are waiting on launch day.` };
+    if (!s.techPartner && s.week >= 3) return { tone: 'warn', text: `Building: ${Math.round(s.progress)}%. To finish faster without hiring, licence tech (${TECH_FROM[s.idea]}) for ${money(techFee(s))} a week, or raise R&D.` };
     return { tone: 'warn', text: `Building: ${Math.round(s.progress)}%. More people and R&D finish it faster. Marketing now builds hype for launch.` };
   }
   if (e.model !== 'copies' && r.demand > r.capacity * 1.08) return { tone: 'warn', text: `Sold out: customers wanted ${Math.round(r.demand)} ${e.units} but you can only handle ${Math.round(r.capacity)}. Raise the price or hire.` };
-  if (e.model !== 'copies' && r.capacity > r.demand * 1.6 && s.team > 1) return { tone: 'warn', text: `Your team is idle: you could handle ${Math.round(r.capacity)} ${e.units} but sold ${Math.round(r.sold)}. Market more, cut the price, or let someone go.` };
+  if (e.model !== 'copies' && r.capacity > r.demand * 1.6 && s.team > 1) return { tone: 'warn', text: `Your team is idle: you could handle ${Math.round(r.capacity)} ${e.units} but sold ${Math.round(r.sold)}. ${s.marketing < marketingBudgetFor(s, 'normal') ? `Set marketing to Normal (${money(marketingBudgetFor(s, 'normal'))} a week)` : s.salesPartner ? 'Market more' : 'Sign a sales partner'}, cut the price, or let someone go.` };
   if (e.model === 'copies' && s.novelty < 0.45) return { tone: 'warn', text: 'Sales are fading. Spend on R&D to ship updates and bring players back.' };
   if (r.profit < 0) return { tone: 'warn', text: `You lost ${money(-r.profit)} this week. Costs: wages ${money(r.wages)}, marketing ${money(r.marketing)}, R&D ${money(r.rd)}.` };
   return { tone: 'good', text: `Profit ${money(r.profit)} this week. Margin per ${e.unit}: ${money(unitMargin(s))}.` };
@@ -542,6 +552,71 @@ export function setPrice(s: Startup, price: number) {
 export function setMarketing(s: Startup, v: number) { s.marketing = Math.max(0, Math.min(10_000, Math.round(v))); }
 export function setRd(s: Startup, v: number) { s.rd = Math.max(0, Math.min(10_000, Math.round(v))); }
 export function setSide(s: Startup, on: boolean) { s.side = on; }
+export function setTechPartner(s: Startup, on: boolean) { s.techPartner = on; say(s, on ? `Signed a tech licence: ${TECH_FROM[s.idea]}.` : 'Ended the tech licence.', 'neutral'); }
+export function setSalesPartner(s: Startup, on: boolean) { s.salesPartner = on; say(s, on ? `Signed a sales deal: ${SALES_FROM[s.idea]}.` : 'Ended the sales deal.', 'neutral'); }
+
+// ---------------------------------------------------------------- simple levels and partners
+
+export type Level = 'off' | 'low' | 'normal' | 'high';
+export const LEVELS: Level[] = ['off', 'low', 'normal', 'high'];
+/** Share of the Normal budget at each level */
+const LEVEL_X: Record<Level, number> = { off: 0, low: 0.5, normal: 1, high: 2 };
+/** Normal weekly budgets: what a sensible founder of each kind of business spends */
+const NORMAL_MKT: Record<Model, number> = { hours: 400, subs: 900, copies: 1200 };
+const NORMAL_RD: Record<Model, number> = { hours: 300, subs: 900, copies: 1200 };
+const NORMAL_DEEP = { mkt: 600, rd: 1500 }; // chips and energy: few, big customers and long research
+const round50 = (n: number) => Math.round(n / 50) * 50;
+
+/** Marketing budget for a level: Normal reaches about 8 new people per reach-cost unit a week */
+export function marketingBudgetFor(s: Pick<Startup, 'idea' | 'kind'>, l: Level): number {
+  const deep = s.idea === 'chips' || s.idea === 'energy';
+  return Math.min(10_000, round50((deep ? NORMAL_DEEP.mkt : NORMAL_MKT[econOf(s).model]) * LEVEL_X[l]));
+}
+export function rdBudgetFor(s: Pick<Startup, 'idea' | 'kind'>, l: Level): number {
+  const deep = s.idea === 'chips' || s.idea === 'energy';
+  return Math.min(10_000, round50((deep ? NORMAL_DEEP.rd : NORMAL_RD[econOf(s).model]) * LEVEL_X[l]));
+}
+/** The level closest to a budget (budgets set by hand or by old saves) */
+export function levelOf(amount: number, at: (l: Level) => number): Level {
+  return LEVELS.reduce((b, l) => (Math.abs(at(l) - amount) < Math.abs(at(b) - amount) ? l : b), 'off' as Level);
+}
+/** New people a week from a marketing budget (before your partners and happy customers) */
+export function peopleFrom(s: Pick<Startup, 'idea' | 'kind'>, amount: number): number {
+  const e = econOf(s);
+  return e.reachCost > 0 ? Math.pow(Math.max(0, amount) / e.reachCost, 0.9) : 0;
+}
+/** Quality an R&D budget leads to over time */
+export function qualityFrom(s: Pick<Startup, 'idea' | 'kind' | 'techPartner'>, amount: number): number {
+  const e = econOf(s);
+  return Math.min(1, 0.35 + 0.6 * (amount / (amount + e.rdHalf)) + (s.techPartner ? TECH_QUALITY : 0));
+}
+
+/** A tech licence: weekly fee while you build, then a royalty on sales. */
+export const TECH_ROYALTY = 0.05;
+export const TECH_QUALITY = 0.1;
+/** A sales partner: once you launch, takes this share of your sales and markets you like most of a Normal budget. */
+export const SALES_CUT = 0.1;
+export const SALES_REACH = 0.75;
+
+export const TECH_FROM: Record<IdeaId, string> = {
+  freelance: 'templates and tools from a big agency',
+  ai: 'a ready-made AI model from a large lab',
+  gaming: 'a game engine and art packs from a big studio',
+  chips: 'proven design blocks from a large chipmaker',
+  energy: 'panel and battery designs from an energy giant',
+};
+export const SALES_FROM: Record<IdeaId, string> = {
+  freelance: 'an agency passes you clients',
+  ai: 'a software marketplace lists your tool',
+  gaming: 'a big publisher promotes your game',
+  chips: 'a chip distributor sells your designs',
+  energy: 'a utility offers your pilots to its customers',
+};
+
+export function techFee(s: Pick<Startup, 'idea' | 'kind' | 'launched'>): number {
+  return s.launched ? 0 : round50(econOf(s).rdHalf * 0.4);
+}
+
 
 export function hire(s: Startup): boolean {
   if (s.team >= 12) return false;
@@ -606,15 +681,16 @@ export function playWeek(s: Startup): void {
   const work = s.side ? 0.5 : 1;
 
   // Marketing brings new people (with diminishing returns); people slowly forget you
-  const reached = e.reachCost > 0 ? Math.pow(s.marketing / e.reachCost, 0.9) : 0;
+  const reached = peopleFrom(s, s.marketing) + (s.salesPartner && s.launched ? peopleFrom(s, marketingBudgetFor(s, 'normal') * SALES_REACH) : 0);
   const forget = !s.launched && e.model === 'copies' ? 0.015 : 0.08;
   s.reach = s.reach * (1 - forget) + reached;
 
   // R&D raises quality toward a target; before launch it also builds the product
-  const qTarget = 0.35 + 0.6 * (s.rd / (s.rd + e.rdHalf));
+  const qTarget = qualityFrom(s, s.rd);
   s.quality += (qTarget - s.quality) * 0.12;
   if (!s.launched) {
-    s.progress = Math.min(100, s.progress + (s.team * e.teamPoints * work + s.rd / e.rdPerPoint) * (0.8 + 0.4 * s.quality) * range(r, 0.85, 1.15));
+    const borrowed = s.techPartner ? e.rdHalf / e.rdPerPoint : 0; // licensed tech does part of the building
+    s.progress = Math.min(100, s.progress + (s.team * e.teamPoints * work + s.rd / e.rdPerPoint + borrowed) * (0.8 + 0.4 * s.quality) * range(r, 0.85, 1.15));
   } else if (e.model === 'copies') {
     s.novelty = Math.min(1, s.novelty * 0.9 + s.rd / 40_000);
   }
@@ -672,9 +748,10 @@ export function playWeek(s: Startup): void {
   const wages = (s.team - 1) * e.salary;
   const variable = sold * e.varCost + revenue * e.varShare;
   const interest = s.debt * WEEKLY_RATE;
+  const partners = (s.techPartner ? techFee(s) + revenue * TECH_ROYALTY : 0) + (s.salesPartner ? revenue * SALES_CUT : 0);
   // Operating profit (side work is extra cash, not part of the business, so it does not raise the value)
-  const profit = revenue - wages - e.rent - variable - s.marketing - s.rd - interest;
-  const rep: WeekReport = { week: s.week, demand, capacity: capacity === Infinity ? demand : capacity, sold, revenue, wages, rent: e.rent, variable, marketing: s.marketing, rd: s.rd, interest, side, profit, newCustomers: newC, lost };
+  const profit = revenue - wages - e.rent - variable - s.marketing - s.rd - interest - partners;
+  const rep: WeekReport = { week: s.week, demand, capacity: capacity === Infinity ? demand : capacity, sold, revenue, wages, rent: e.rent, variable, marketing: s.marketing, rd: s.rd, interest, partners, side, profit, newCustomers: newC, lost };
   s.cash += profit + side;
   s.last = rep;
   s.hist.push(rep);
@@ -904,7 +981,8 @@ export function starterOffers(seed: number): StarterOffer[] {
   return STARTER_GOODS.map((g) => {
     const names = STARTER_NAMES[g]!;
     const name = names[Math.floor(next(r) * names.length)];
-    const price = Math.round((startCost(g) * 1.15) / 1000) * 1000;
+    // An existing small firm sells for about what plants used to cost: cheaper than building new, and it has customers
+    const price = Math.round(((startCost(g) / BUILD_COST_MULT) * 1.15) / 1000) * 1000;
     const def = GOODS[g];
     const pitch = def.tier === 'raw' ? 'Raw materials: sells to factories. No inputs to buy.' : `Makes ${def.name.toLowerCase()} from ${def.inputs.map((i) => GOODS[i.good].name.toLowerCase()).join(', ')}.`;
     return { good: g, name, price, pitch };

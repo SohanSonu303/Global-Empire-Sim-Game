@@ -8,28 +8,51 @@ import { clamp, refPrice } from './company';
 import { remember } from './contracts';
 import { addNews, fmtMoney } from './news';
 import { banner, unlocked } from './rewards';
-import type { CommandResult, Company, GoodId, Warehouse, WorldState } from './types';
+import { bookDelivery } from './strategy';
+import type { CommandResult, Company, Contract, GoodId, Job, OutputSplit, StockDest, Warehouse, WorldState } from './types';
 
 /** Goods that cannot be put on a shelf. */
 export const NOT_STORABLE: GoodId[] = ['electricity', 'software', 'telecom', 'freight', 'clinics', 'banking'];
 
-/** Share lost per day in storage. */
-const SPOIL: Partial<Record<GoodId, number>> = { food: 0.004, grain: 0.002, cotton: 0.0015, medicine: 0.001, timber: 0.0008, water: 0.002, cement: 0.001, batteries: 0.0006 };
-const SPOIL_DEFAULT = 0.0003;
+/** Share lost per month in fresh storage. Durable goods lose 0.25% a month; food and crops far more. */
+const SPOIL_MONTH: Partial<Record<GoodId, number>> = { food: 0.06, grain: 0.03, water: 0.03, cotton: 0.02, medicine: 0.015, cement: 0.015, timber: 0.01, batteries: 0.01 };
+const SPOIL_DEFAULT = 0.0025;
+/** Stock kept longer than this many months starts to age: the loss grows by half for each extra month, up to 3x. */
+export const FRESH_MONTHS = 3;
+const AGE_STEP = 0.5;
+const AGE_MAX = 3;
 
 export const WAREHOUSE_SPACE = 6_000; // level 1
 export const WAREHOUSE_GROWTH = 1.6; // space per level
-export const WAREHOUSE_COST = 150_000;
+export const WAREHOUSE_COST = 400_000;
+/** Each further warehouse costs this much more than the last */
+export const WAREHOUSE_GROWTH_COST = 1.8;
 export const MAX_WAREHOUSE_LEVEL = 10;
 /** Storage cost per day as a share of the stock's value */
-export const HOLD_RATE = 0.0004;
+export const HOLD_RATE = 0.0005;
 
 export function storable(g: GoodId): boolean {
   return !NOT_STORABLE.includes(g);
 }
 
-export function spoilRate(g: GoodId): number {
-  return SPOIL[g] ?? SPOIL_DEFAULT;
+/** Share lost per month while stock is fresh */
+export function spoilMonth(g: GoodId): number {
+  return SPOIL_MONTH[g] ?? SPOIL_DEFAULT;
+}
+
+/** How much faster stock spoils after sitting `months` in storage */
+export function ageMult(months: number): number {
+  return Math.min(AGE_MAX, 1 + AGE_STEP * Math.max(0, months - FRESH_MONTHS));
+}
+
+/** Months a stock pile has been stored, on average */
+export function monthsStored(w: WorldState, st: { since?: number }): number {
+  return Math.max(0, (w.day - (st.since ?? w.day)) / 30);
+}
+
+/** Share lost per day for this pile, given how long it has been stored */
+export function spoilRate(g: GoodId, months = 0): number {
+  return (spoilMonth(g) * ageMult(months)) / 30;
 }
 
 /** Space one unit takes: a level-1 plant's daily output fills about 100 space. */
@@ -65,7 +88,38 @@ export function totalRoom(w: WorldState, g: GoodId): number {
 
 /** A company of yours that keeps running at full capacity and stores the extra. */
 export function isStoring(w: WorldState, c: Company): boolean {
-  return c.isPlayer && !!c.automation.toWarehouse && (w.play?.warehouses.length ?? 0) > 0 && totalRoom(w, c.good) > c.capacity * 0.5;
+  if (!c.isPlayer || !(w.play?.warehouses.length)) return false;
+  const room = totalRoom(w, c.good);
+  return (!!c.automation.toWarehouse && room > c.capacity * 0.5) || (warehouseShare(w, c) > 0 && room > c.capacity * warehouseShare(w, c));
+}
+
+// ---------- output split ----------
+
+/** Split shares are kept in steps of 5% */
+const step5 = (x: number) => Math.round(clamp(x, 0, 1) * 20) / 20;
+
+export function cleanSplit(s: OutputSplit): OutputSplit {
+  const out = { deals: step5(s.deals), contracts: step5(s.contracts), warehouse: step5(s.warehouse) };
+  const sum = out.deals + out.contracts + out.warehouse;
+  if (sum > 1) { const k = 1 / sum; out.deals = step5(out.deals * k); out.contracts = step5(out.contracts * k); out.warehouse = step5(1 - out.deals - out.contracts); }
+  return out;
+}
+
+export function marketShareOf(s: OutputSplit): number {
+  return Math.max(0, 1 - s.deals - s.contracts - s.warehouse);
+}
+
+/** Share of output a company sends to the warehouse (0 without a warehouse) */
+export function warehouseShare(w: WorldState, c: Company): number {
+  return c.isPlayer && c.split && (w.play?.warehouses.length ?? 0) > 0 ? c.split.warehouse : 0;
+}
+
+export function setSplit(w: WorldState, c: Company, s: OutputSplit | null): CommandResult {
+  if (!s) { delete c.split; return ok('Output split cleared: deals, contracts and the market share freely'); }
+  const v = cleanSplit(s);
+  if (v.warehouse > 0 && !w.play.warehouses.length) return fail('Build a warehouse first (Deals & Strategies › Warehouses)');
+  c.split = v;
+  return ok(`Saved: ${Math.round(marketShareOf(v) * 100)}% market, ${Math.round(v.deals * 100)}% deals, ${Math.round(v.contracts * 100)}% contracts, ${Math.round(v.warehouse * 100)}% warehouse`);
 }
 
 export function storedQty(w: WorldState, g: GoodId): number {
@@ -79,7 +133,7 @@ export function stockValue(w: WorldState): number {
 }
 
 export function buildCost(w: WorldState): number {
-  return Math.round(WAREHOUSE_COST * Math.pow(1.35, w.play.warehouses.length) / 1000) * 1000;
+  return Math.round(WAREHOUSE_COST * Math.pow(WAREHOUSE_GROWTH_COST, w.play.warehouses.length) / 1000) * 1000;
 }
 
 export function upgradeCostOf(wh: Warehouse): number {
@@ -87,7 +141,7 @@ export function upgradeCostOf(wh: Warehouse): number {
 }
 
 export function runningCost(wh: Warehouse): number {
-  return 250 * Math.pow(wh.level, 0.9);
+  return 600 * Math.pow(wh.level, 0.9);
 }
 
 /** Daily cost of a warehouse: rent and staff plus a share of the stock's value. */
@@ -97,11 +151,12 @@ export function dailyCost(w: WorldState, wh: Warehouse): number {
   return runningCost(wh) + value * HOLD_RATE;
 }
 
-export function addStock(wh: Warehouse, g: GoodId, qty: number, unitCost: number): void {
+export function addStock(wh: Warehouse, g: GoodId, qty: number, unitCost: number, day?: number): void {
   if (qty <= 0) return;
-  const cur = wh.stock[g] ?? { qty: 0, cost: unitCost };
+  const cur = wh.stock[g] ?? { qty: 0, cost: unitCost, since: day };
   const total = cur.qty + qty;
-  wh.stock[g] = { qty: total, cost: (cur.qty * cur.cost + qty * unitCost) / total };
+  const since = day === undefined ? cur.since : ((cur.since ?? day) * cur.qty + day * qty) / total;
+  wh.stock[g] = { qty: total, cost: (cur.qty * cur.cost + qty * unitCost) / total, since };
 }
 
 /** Put up to qty units into your warehouses (in order). Returns what fit. */
@@ -110,7 +165,7 @@ export function store(w: WorldState, g: GoodId, qty: number, unitCost: number): 
   for (const wh of w.play.warehouses) {
     if (left <= 0) break;
     const put = Math.min(left, roomFor(wh, g));
-    addStock(wh, g, put, unitCost);
+    addStock(wh, g, put, unitCost, w.day);
     left -= put;
   }
   return qty - left;
@@ -176,7 +231,8 @@ export function dailyWarehouses(w: WorldState): void {
     for (const g of GOOD_IDS) {
       const st = wh.stock[g];
       if (!st) continue;
-      st.qty *= 1 - spoilRate(g);
+      st.since ??= w.day;
+      st.qty *= 1 - spoilRate(g, monthsStored(w, st));
       // Auto-sell rules: up to 10% of the stock a day while the rule holds
       const rule = wh.rules[g];
       if (rule && st.qty > 0) {
@@ -281,6 +337,62 @@ export function releaseStock(w: WorldState, id: string, g: GoodId, qty: number):
   return ok(r.via === 'traders'
     ? `Sold ${Math.round(r.qty).toLocaleString()} ${GOODS[g].unit} to traders for ${fmtMoney(r.cash)}`
     : `${Math.round(r.qty).toLocaleString()} ${GOODS[g].unit} sent to ${r.via} to sell`);
+}
+
+// ---------- send stock to contracts, deals or the market ----------
+
+/** Your active contracts-board jobs and tenders for a good, soonest deadline first */
+export function openJobs(w: WorldState, g: GoodId): Job[] {
+  return w.play.jobs.filter((j) => j.status === 'active' && j.good === g && j.delivered < j.qty - 1e-6).sort((a, b) => a.deadline - b.deadline);
+}
+
+/** Units a deal still has to deliver, beyond what is already set aside */
+export function dealRoom(w: WorldState, k: Contract): number {
+  const days = Math.max(0, k.endDay - Math.max(w.day, k.startDay) + 1);
+  return Math.max(0, days * k.qtyPerDay - (k.banked ?? 0));
+}
+
+/** Your active supply deals selling a good */
+export function openDeals(w: WorldState, g: GoodId): Contract[] {
+  const mineIds = new Set(w.companies.filter((c) => c.isPlayer && !c.bankrupt).map((c) => c.id));
+  return w.contracts.filter((k) => k.good === g && mineIds.has(k.sellerId) && k.endDay >= w.day).sort((a, b) => a.endDay - b.endDay);
+}
+
+/** Most units each destination can take from storage right now */
+export function sendRoom(w: WorldState, g: GoodId, to: StockDest): number {
+  if (to === 'contracts') return openJobs(w, g).reduce((s, j) => s + j.qty - j.delivered, 0);
+  if (to === 'deals') return openDeals(w, g).reduce((s, k) => s + dealRoom(w, k), 0);
+  return Infinity;
+}
+
+export function sendStock(w: WorldState, id: string, g: GoodId, qty: number, to: StockDest): CommandResult {
+  if (to === 'market') return releaseStock(w, id, g, qty);
+  const wh = w.play.warehouses.find((x) => x.id === id);
+  if (!wh) return fail('Warehouse not found');
+  const want = Math.min(Math.max(0, qty), wh.stock[g]?.qty ?? 0, sendRoom(w, g, to));
+  if (want < 1e-6) return fail(to === 'contracts' ? `No open contract needs ${GOODS[g].name.toLowerCase()}` : `No supply deal of yours sells ${GOODS[g].name.toLowerCase()}`);
+  const got = takeStock(w, g, want, wh);
+  let left = got.qty;
+  if (to === 'contracts') {
+    let paid = 0;
+    for (const j of openJobs(w, g)) {
+      if (left <= 0) break;
+      const t = Math.min(left, j.qty - j.delivered);
+      const cash = bookDelivery(w, j, t);
+      const c = w.companies.find((x) => x.id === j.companyId);
+      if (c) { c.cash += cash; c.last.revenue += cash; }
+      paid += cash;
+      left -= t;
+    }
+    return ok(`Delivered ${Math.round(got.qty).toLocaleString()} ${GOODS[g].unit} to your contracts for ${fmtMoney(paid)}`);
+  }
+  for (const k of openDeals(w, g)) {
+    if (left <= 0) break;
+    const t = Math.min(left, dealRoom(w, k));
+    k.banked = (k.banked ?? 0) + t;
+    left -= t;
+  }
+  return ok(`${Math.round(got.qty).toLocaleString()} ${GOODS[g].unit} set aside for your deals: they are delivered first each day, so your plant can sell more on the market`);
 }
 
 export function setSellRule(w: WorldState, id: string, g: GoodId, above?: number, shortage?: boolean): CommandResult {

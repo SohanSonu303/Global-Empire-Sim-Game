@@ -2,7 +2,7 @@ import { isStoring } from './warehouse';
 import { AI_UPGRADE_COST_GROWTH, GOODS, INDUSTRIES, IMPORT_PREMIUM, UPGRADE_COST_GROWTH, fixedAt, upgradeCost, LEVEL_CAP_MULT, MAX_LEVEL, maxPriceMult } from './data';
 import { payOwners } from './ownership';
 import { noteOpsSaved } from './traits';
-import type { Company, DayResult, Explanation, GoodId, LoanReason, WorldState } from './types';
+import type { Boost, Company, DayResult, Explanation, GoodId, LoanReason, MaintLevel, ManagerId, WorldState } from './types';
 
 export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -32,7 +32,62 @@ export function importPrice(w: WorldState, good: GoodId): number {
 
 /** A company's selling price today. */
 export function sellPrice(w: WorldState, c: Company): number {
-  return refPrice(w, c.good) * Math.min(c.priceMult, maxPriceMult(c.good));
+  return refPrice(w, c.good) * Math.min(c.priceMult * boostMult(c, 'price'), maxPriceMult(c.good));
+}
+
+// ---------- running a business: customers, machines, staff, managers ----------
+
+/** Product of the company's active boosts of one kind (expired ones are cleared each day). */
+export function boostMult(c: Company, kind: Boost['kind']): number {
+  let m = 1;
+  for (const b of c.boosts ?? []) if (b.kind === kind) m *= b.mult;
+  return m;
+}
+
+export function addBoost(w: WorldState, c: Company, kind: Boost['kind'], mult: number, days: number, why: string): void {
+  (c.boosts ??= []).push({ kind, mult, until: w.day + days, why });
+}
+
+/** Customers relative to an established firm (1). */
+export function reachOf(c: Company): number {
+  return c.reach ?? 1;
+}
+
+/** A new company's starting customers and team */
+export const NEW_REACH = 0.25;
+export const NEW_SKILL = 0.95;
+/** A new hire's output while learning, against a trained worker */
+export const NEW_HIRE_SKILL = 0.85;
+
+/** Maintenance: daily cost as a share of the plant's fixed costs, and how much condition it restores a day */
+export const MAINT: Record<MaintLevel, { label: string; cost: number; fix: number }> = {
+  low: { label: 'Low', cost: 0, fix: 0 },
+  normal: { label: 'Normal', cost: 0.06, fix: 0.0011 },
+  high: { label: 'High', cost: 0.18, fix: 0.0028 },
+};
+/** Condition lost per day when the plant runs flat out */
+export const WEAR_PER_DAY = 0.0012;
+
+/** Day-to-day managers for your companies: a share of revenue, with a daily minimum */
+export const MANAGERS: Record<ManagerId, { label: string; pct: number; min: number; blurb: string }> = {
+  none: { label: 'You', pct: 0, min: 0, blurb: 'You answer every decision yourself. Free, and the best results if you pay attention.' },
+  basic: { label: 'Manager', pct: 0.01, min: 250, blurb: 'Answers the inbox with safe, middle-of-the-road choices after a couple of days.' },
+  pro: { label: 'Top manager', pct: 0.025, min: 900, blurb: 'Answers the inbox with the best choice right away, keeps maintenance up and tunes the price each week.' },
+};
+
+export function maintCostPerDay(w: WorldState, c: Company): number {
+  return fixedAt(c.good, c.level) * w.macro.priceLevel * (c.fixedScale ?? 1) * MAINT[c.maintenance ?? 'normal'].cost;
+}
+
+export function managerCostPerDay(w: WorldState, c: Company): number {
+  const m = MANAGERS[c.manager ?? 'none'];
+  if (!c.isPlayer || m.pct === 0) return 0;
+  return Math.max(m.min * w.macro.priceLevel, c.sum30.revenue / 30 * m.pct);
+}
+
+/** Output per worker lost to worn machines: none at condition 1, 15% at 0 */
+export function conditionMult(c: Company): number {
+  return 0.85 + 0.15 * (c.condition ?? 1);
 }
 
 export function wageIndex(w: WorldState): number {
@@ -66,7 +121,7 @@ export function unitEconomics(w: WorldState, good: GoodId, opts?: { level?: numb
 }
 
 export function productivity(c: Company): number {
-  return GOODS[c.good].unitsPerWorker * (0.6 + 0.5 * c.morale) * (c.isPlayer && c.ops ? 1.05 : 1);
+  return GOODS[c.good].unitsPerWorker * (0.6 + 0.5 * c.morale) * (c.isPlayer && c.ops ? 1.05 : 1) * (c.skill ?? 1) * conditionMult(c) * boostMult(c, 'productivity');
 }
 
 /** Staff needed to run at full capacity. */
@@ -183,6 +238,8 @@ export function runAutomation(w: WorldState, c: Company): void {
         drawCredit(w, c, hireCost - c.cash, 'hiring');
       }
       if (c.cash >= hireCost) {
+        // New hires start slower than trained workers and dilute the team's experience
+        if (c.isPlayer) c.skill = ((c.skill ?? 1) * c.workers + NEW_HIRE_SKILL * hires) / Math.max(1, c.workers + hires);
         c.workers += hires;
         c.cash -= hireCost;
       }
@@ -202,7 +259,8 @@ export function runAutomation(w: WorldState, c: Company): void {
   else c.lowCashDays = Math.max(0, c.lowCashDays - 1);
 
   // Dividends to the owner
-  const keep = a.minCash + (c.lockedCapital ?? 0);
+  // Your companies keep about 10 days of running costs before paying you: customers pay late and bills come early
+  const keep = a.minCash + (c.lockedCapital ?? 0) + (c.isPlayer ? (c.last.opex + c.last.purchases) * 10 : 0);
   if (c.last.netIncome > 0 && a.dividendPct > 0 && c.cash > keep) {
     const div = Math.min(c.cash - keep, (c.last.netIncome * a.dividendPct) / 100);
     if (div > 0) {
@@ -227,7 +285,7 @@ export function runAutomation(w: WorldState, c: Company): void {
 /** Private valuation: book equity plus a multiple of trailing earnings. */
 export function companyValue(c: Company): number {
   const annualNet = c.sum30.netIncome * 12.17;
-  return Math.max(0, c.cash - c.debt + c.assets * 0.6 + Math.max(0, annualNet) * 3);
+  return Math.max(0, c.cash + (c.receivables ?? 0) - c.debt + c.assets * 0.6 + Math.max(0, annualNet) * 3);
 }
 
 export function companyValueExplain(c: Company): Explanation {
@@ -236,6 +294,7 @@ export function companyValueExplain(c: Company): Explanation {
     title: `${c.name} valuation`,
     lines: [
       { label: 'Cash', value: c.cash, op: '' },
+      ...(c.receivables ? [{ label: 'Owed by customers', value: c.receivables, op: '+' as const }] : []),
       { label: 'Debt', value: c.debt, op: '-' },
       { label: 'Fixed assets x 0.6', value: c.assets * 0.6, op: '+' },
       { label: 'Annual net income x 3', value: Math.max(0, annualNet) * 3, op: '+' },

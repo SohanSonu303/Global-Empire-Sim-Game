@@ -18,7 +18,7 @@ export const INDUSTRY_IDS = Object.keys(INDUSTRIES) as IndustryId[];
 /** Variable costs (inputs + other + labour) are this share of the reference price at level 1. */
 const VAR_SHARE = 0.58;
 /** Fixed costs are this share of revenue for a level-1 company at full capacity. */
-const FIXED_SHARE = 0.2;
+const FIXED_SHARE = 0.21;
 /** A level-1 company's full-capacity daily revenue is foundCost / this. */
 const REVENUE_DAYS = 16;
 const PRODUCTIVITY_AT_START = 0.975; // productivity factor at morale 0.75
@@ -135,7 +135,7 @@ export const BANK_START = 10_000_000;
  */
 export const START_MULT: Partial<Record<GoodId, number>> = {
   // Raw producers need no inputs, so getting in costs more (x1.6 on the old prices)
-  iron_ore: 2.65, grain: 2.4, cotton: 2.5, silicon: 2.95, timber: 2.5, crude_oil: 2.95,
+  iron_ore: 1.45, grain: 2.4, cotton: 2.5, silicon: 2.95, timber: 2.5, crude_oil: 2.95,
   electricity: 1.45, plastics: 1.35, chemicals: 1.45, glass: 1.45, freight: 1.35, steel: 1.65, chips: 1.5,
   cars: 1.7, appliances: 1.9, phones: 1.5, software: 1.1, food: 1.2, clothing: 1.1, furniture: 1.7,
   laptops: 1.45, medicine: 1.55, telecom: 1.55, clinics: 1.35,
@@ -146,9 +146,15 @@ export const START_MULT: Partial<Record<GoodId, number>> = {
 };
 
 /** What you pay to found a company of this good (not counting any industry licence). */
+/**
+ * What you pay to build a plant, on top of the economy's base cost: real plants take a year or two
+ * to pay for themselves, so a new business is a commitment you have to run well.
+ */
+export const BUILD_COST_MULT = 1.6;
+
 export function startCost(good: GoodId): number {
   if (good === 'banking') return Math.max(BANK_START, GOODS[good].foundCost);
-  return Math.round((GOODS[good].foundCost * (START_MULT[good] ?? 1.3)) / 1000) * 1000;
+  return Math.round((GOODS[good].foundCost * (START_MULT[good] ?? 1.3) * BUILD_COST_MULT) / 1000) * 1000;
 }
 
 /** The highest price multiple you may charge (regulated goods are capped at the market price). */
@@ -165,7 +171,7 @@ export function requiredCapital(good: GoodId): number {
  * Your upgrades start at 1.4x the plant's base price for level 2 (AI firms pay 0.9x), then each level
  * costs 1.75x the last. Growing one plant is a real investment, not a quick win.
  */
-export const PLAYER_UPGRADE_BASE = 1.4;
+export const PLAYER_UPGRADE_BASE = 1.4 * BUILD_COST_MULT;
 export const AI_UPGRADE_BASE = 0.9;
 
 export function upgradeCost(good: GoodId, level: number, growth = UPGRADE_COST_GROWTH, base = growth === AI_UPGRADE_COST_GROWTH ? AI_UPGRADE_BASE : PLAYER_UPGRADE_BASE): number {
@@ -363,10 +369,10 @@ export const COUNTRIES = [
   { id: 'meridian', name: 'East Meridian', identity: 'Export powerhouse', advantage: 'Electronics and shipping', unlocked: false },
 ] as const;
 
-/** Steepness of the level curve: level 10 needs about 36K XP in total, level 20 about 160K. */
-export const XP_CURVE = 1.95;
+/** Steepness of the level curve: level 10 needs about 77K XP in total, level 20 about 410K. */
+export const XP_CURVE = 2.25;
 
 /** Total XP you need to leave this level. */
 export function xpForLevel(level: number): number {
-  return Math.round((500 * Math.pow(level, XP_CURVE)) / 50) * 50;
+  return Math.round((550 * Math.pow(level, XP_CURVE)) / 50) * 50;
 }

@@ -5,7 +5,7 @@
  */
 import { GOODS } from './data';
 import { clamp, refPrice } from './company';
-import { plannedOutput } from './economy';
+import { plannedOutput, returnBanked } from './economy';
 import { addNews, fmtPct, fmtPrice } from './news';
 import type { CommandResult, Company, Contract, GoodId, Rival, WorldState } from './types';
 
@@ -68,6 +68,11 @@ export function offerContract(
 ): CommandResult {
   if (qtyPerDay <= 0 || price <= 0) return { ok: false, message: 'Enter a quantity and price' };
   const d = Math.round(clamp(days, MIN_DAYS, MAX_DAYS));
+  if (side === 'sell' && mine.split) {
+    const booked = w.contracts.filter((k) => k.sellerId === mine.id && k.endDay >= w.day).reduce((s, k) => s + k.qtyPerDay, 0);
+    const allowed = mine.split.deals * mine.capacity;
+    if (booked + qtyPerDay > allowed + 1e-6) return { ok: false, message: `Your output split gives deals ${Math.round(mine.split.deals * 100)}% of ${mine.name}'s output (${Math.round(allowed).toLocaleString()} ${GOODS[mine.good].unit} a day). Raise it on the company's Overview first.` };
+  }
   const verdict = judgeOffer(w, mine, partner, side, qtyPerDay, price);
   const rv = ownerRival(w, partner);
   if (!verdict.accept) return { ok: false, message: verdict.reason };
@@ -95,6 +100,7 @@ export function cancelContract(w: WorldState, id: string): CommandResult {
   const mine = w.companies.find((c) => c.isPlayer && (c.id === k.sellerId || c.id === k.buyerId));
   if (!mine) return { ok: false, message: 'Not your deal' };
   const partner = w.companies.find((c) => c.id === (k.sellerId === mine.id ? k.buyerId : k.sellerId));
+  returnBanked(w, k);
   w.contracts = w.contracts.filter((x) => x.id !== id);
   if (partner) remember(ownerRival(w, partner), w, -8, `${mine.name} broke our ${GOODS[k.good].name.toLowerCase()} deal.`);
   return { ok: true, message: 'Deal cancelled. The partner will remember.' };

@@ -17,6 +17,7 @@ import { EventSheet } from './ui/screens/Overlays';
 import { RewardOverlays } from './ui/screens/Rewards';
 import { TitleScreen } from './ui/screens/Title';
 import { StrategyScreen } from './ui/screens/Strategy';
+import { InboxScreen } from './ui/screens/Inbox';
 
 function RouteView({ r }: { r: Route }) {
   switch (r.screen) {
@@ -35,6 +36,7 @@ function RouteView({ r }: { r: Route }) {
     case 'article': return <ArticleScreen id={r.id} />;
     case 'strategy': return <StrategyScreen tab={r.tab} />;
     case 'reports': return <ReportsScreen />;
+    case 'inbox': return <InboxScreen />;
   }
 }
 

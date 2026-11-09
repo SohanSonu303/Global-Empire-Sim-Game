@@ -98,6 +98,7 @@ export function tycoonFound(w: WorldState, r: Rival, good?: GoodId): Company | n
   w.seq += 1;
   const c = newCompany(w, { id: `t${w.seq}`, name: companyName(w, r, g), good: g, ownerId: r.id, isPlayer: false, ticker: null, level, capacity: cap });
   if (shareAfter(w, c, r.id) > MONOPOLY_SHARE) return null;
+  c.reach = 0.3; // a famous founder brings some buyers, but still has to win the rest
   const working = cap * def.p0 * 30;
   const permit = rivalHasPermit(w, r.id, g) ? 0 : def.permit ?? 0;
   const cost = c.assets + working + permit;

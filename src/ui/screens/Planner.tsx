@@ -287,9 +287,10 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
           <Forecast label="Sales / day" value={`${Math.round(p.soldPerDay).toLocaleString()} of ${Math.round(p.capacity).toLocaleString()}`} />
           <Forecast label="Profit / day" value={fmtMoney(p.profitDay)} tone={p.profitDay > 0 ? 'good' : 'bad'} />
           <Forecast label="Margin" value={fmtPct(p.margin, 0)} tone={p.margin > 0 ? 'good' : 'bad'} />
-          <Forecast label="Pays back in" value={Number.isFinite(p.paybackDays) ? `${Math.round(p.paybackDays)} days` : 'Never'} tone={p.paybackDays < 360 ? 'good' : 'bad'} />
+          <Forecast label="Pays back in" value={Number.isFinite(p.paybackDays) ? `${Math.round(p.paybackDays)} days` : 'Never'} tone={p.paybackDays < 540 ? 'good' : 'bad'} />
         </div>
-        <p className="text-xs text-dim mt-2">A forecast at today's prices. Cheaper wins buyers faster but earns less on each sale.</p>
+        <p className="text-xs text-dim mt-2">A forecast at today's prices, once the company has won its customers. Cheaper wins buyers faster but earns less on each sale.</p>
+        {!def.reg && <p className="text-xs text-amber mt-1">A new company starts with about a quarter of the customers an established firm has and wins the rest over 3 to 6 months (faster with more marketing), so expect to lose money at first. Most plants pay for themselves in one to two years.</p>}
       </Section>
 
       <Section title={`Who makes it now (${producers.length})`}>

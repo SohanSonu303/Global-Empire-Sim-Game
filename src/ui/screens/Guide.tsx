@@ -177,7 +177,7 @@ function Play() {
           { title: 'Start a company', body: 'Tap an empty plot on Home, or + New on Business. The Planner shows what is in demand, what it costs to start and a profit forecast.' },
           { title: 'Press Play', body: 'Watch Profit / day on Home. Your new company makes a small profit at first.' },
           { title: 'Claim your goals', body: "Today's Goals on Home give cash and XP. Tap Claim when a goal is done." },
-          { title: 'Answer events', body: 'Unions, deals and offers pop up. Each choice says what it changes (cash, morale, brand, relationship).' },
+          { title: 'Answer your inbox', body: 'Every month your staff and customers bring a few decisions, and rivals write when they make a move (Home › Inbox). Each choice says what it changes. Unanswered ones take the default after two weeks.' },
           { title: 'Upgrade when you have cash', body: 'Open your company and tap Upgrade. A bigger company can sell more.' },
         ]}
       />
@@ -189,7 +189,7 @@ function Play() {
         </p>
       </Card>
       <Card className="divide-y divide-line mt-2">
-        <Lever icon="📜" name="Industry licence" effect="You may only found companies in industries you hold a licence for. The first one is free; the others are paid to the government." tip="New plants cost more in easy, high-margin businesses like ores, cars and appliances. Most pay back in about 6 months." />
+        <Lever icon="📜" name="Industry licence" effect="You may only found companies in industries you hold a licence for. The first one is free; the others are paid to the government." tip="New plants cost more in easy, high-margin businesses like ores, cars and appliances. Most pay back in one to two years, faster if you run them well." />
         <Lever icon="👛" name="Personal cash" effect="Pays to found companies, buy shares, industry licences, and the part of an upgrade the company can't cover." tip="Goal rewards and dividends from your companies land here." />
         <Lever icon="🏦" name="Company cash" effect="Pays that company's materials, wages, running costs and loan interest." tip="Each company keeps its own profits. Set a dividend in Automation to send part of them to you." />
         <Lever icon="➡️" name="Invest" effect="Moves 25% of your personal cash into the company (Financials tab)." tip="Use it when a company is low on cash, so it does not borrow and pay interest." />

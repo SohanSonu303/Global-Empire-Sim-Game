@@ -73,7 +73,8 @@ export function corporateAI(w: WorldState, c: Company): void {
   const pmCap = Math.min(1.35, maxPriceMult(c.good), (importPrice(w, c.good) / ref) * 0.97);
   const unitCost = (r.cogs + r.wages + r.fixed) / Math.max(1, r.sold);
   const canRaise = c.priceMult * 1.03 < pmCap;
-  const canCut = c.priceMult > 0.7 && ref * c.priceMult * 0.97 > unitCost * 1.03;
+  // Rivals undercut, but don't dump below 85% of the market price (that wipes out small newcomers)
+  const canCut = c.priceMult > 0.85 / 0.97 && ref * c.priceMult * 0.97 > unitCost * 1.03;
   if (c.priceMult > pmCap) c.priceMult = pmCap;
   cands.push({
     id: 'raisePrice',

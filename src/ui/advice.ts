@@ -22,5 +22,6 @@ export function runAction(a: AdviceAction): void {
     case 'openPlanner': s.push({ screen: 'planner', good: a.good }); break;
     case 'openEvent': useGame.setState({ eventOpen: true }); break;
     case 'openMarkets': s.setTab('markets'); break;
+    case 'openInbox': s.push({ screen: 'inbox' }); break;
   }
 }

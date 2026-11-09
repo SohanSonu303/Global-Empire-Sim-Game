@@ -10,6 +10,11 @@ import { companyValue, creditLimit, damageMult, importPrice, nextUpgradeCost, pr
 import { effectMult } from './economy';
 import { contractsOf, dailyNeed, dealPartners, judgeOffer, ownerRival } from './contracts';
 import { fmtMoney, fmtPct, fmtPrice } from './news';
+import { daysToReach, fillRate, marketQuality } from './business';
+import { MANAGERS, clamp, maintCostPerDay, managerCostPerDay, reachOf } from './company';
+import { cycleOf } from './cycle';
+import { inbox, openCards } from './inbox';
+import { RECEIVABLE_DAYS } from './economy';
 import type { Command, Company, DayResult, GoodId, WorldState } from './types';
 
 export type Severity = 'urgent' | 'warn' | 'tip' | 'good';
@@ -19,6 +24,7 @@ export type AdviceAction =
   | { type: 'openCompany'; label: string; companyId: string }
   | { type: 'openPlanner'; label: string; good?: GoodId }
   | { type: 'openEvent'; label: string }
+  | { type: 'openInbox'; label: string }
   | { type: 'openMarkets'; label: string };
 
 export interface Advice {
@@ -404,6 +410,8 @@ function adviseRaw(w: WorldState, c: Company): Advice[] {
     });
   }
 
+  adviseRunning(w, c, add);
+
   // Losing money with no specific cause found
   if (c.sum30.netIncome < 0 && out.length === 0 && w.day - c.founded > 20) {
     add({ id: `loss-${c.id}`, severity: 'warn', title: `${c.name} is losing money`, body: `It loses about ${fmtMoney(-perDay(w, c, 'netIncome'))} a day. Open it to see where the money goes.`, action: open });
@@ -423,6 +431,98 @@ function adviseRaw(w: WorldState, c: Company): Advice[] {
     if (lock) add(lock);
   }
   return out;
+}
+
+/** Marketing a company of this kind needs to win and keep customers (consumer brands need far more than commodities) */
+export function marketingGoal(g: GoodId): number {
+  const t = GOODS[g].tier;
+  return t === 'product' ? 0.05 : t === 'material' ? 0.03 : 0.02;
+}
+
+/** R&D share that, held for a year or so, brings quality up to `goal` */
+export function rdFor(c: Company, goal: number): number {
+  return clamp((goal - 0.8) / INDUSTRIES[c.industry].rdK, 0, 0.1);
+}
+
+/** Customers, quality, machines, staff and cash flow: running the business well. */
+function adviseRunning(w: WorldState, c: Company, add: (a: Omit<Advice, 'companyId'>) => void): void {
+  const def = GOODS[c.good];
+  const product = def.tier === 'product';
+  const weekly = (pct: number) => (Math.max(c.sum30.revenue, c.capacity * refPrice(w, c.good) * 30 * 0.5) / 30) * 7 * pct;
+  const reach = reachOf(c);
+  const spend = (m: number, r: number): Command => ({ type: 'setSpend', companyId: c.id, marketingPct: m, rdPct: r });
+
+  // Winning customers: the single biggest lever for a new company
+  const goalMkt = marketingGoal(c.good);
+  if (reach < 0.85 && !def.reg && c.marketingPct < goalMkt - 0.004) {
+    const now = daysToReach(w, c, 0.8);
+    const then = daysToReach(w, c, 0.8, goalMkt);
+    const weeks = (d: number) => (Number.isFinite(d) ? `about ${Math.max(1, Math.round(d / 7))} weeks` : 'never at this rate');
+    add({
+      id: `customers-${c.id}`, severity: 'tip', title: `Win customers faster for ${c.name}`,
+      body: `${c.name} has ${Math.round(reach * 100)}% of the customers an established ${def.name.toLowerCase()} firm has, so most buyers still go to rivals. Raising marketing from ${fmtPct(c.marketingPct, 0)} to ${fmtPct(goalMkt, 0)} of sales (about ${fmtMoney(weekly(goalMkt) - weekly(c.marketingPct))} more a week) gets you to 80% in ${weeks(then)} instead of ${weeks(now)}.${product ? ' Shoppers follow brands, so it pays to spend.' : ' Factory buyers mostly compare price, so you do not need more than this.'}`,
+      action: { type: 'command', label: `Marketing to ${fmtPct(goalMkt, 0)}`, cmd: spend(goalMkt, c.rdPct) },
+    });
+  }
+  // Commodity buyers ignore ads: don't waste money
+  if (!product && reach > 0.95 && c.marketingPct > goalMkt + 0.02 && c.sum30.revenue > 0) {
+    add({
+      id: `adwaste-${c.id}`, severity: 'tip', title: `${c.name} spends a lot on marketing`,
+      body: `Factories buy ${def.name.toLowerCase()} mostly on price, and ${c.name} already has its customers. Cutting marketing from ${fmtPct(c.marketingPct, 0)} to ${fmtPct(goalMkt, 0)} saves about ${fmtMoney((weekly(c.marketingPct) - weekly(goalMkt)) * 4.3)} a month.`,
+      action: { type: 'command', label: `Marketing to ${fmtPct(goalMkt, 0)}`, cmd: spend(goalMkt, c.rdPct) },
+    });
+  }
+  // Quality against rivals
+  const mq = marketQuality(w, c.good);
+  const gap = c.quality / mq;
+  if (w.day - c.founded > 14 && (product ? gap < 0.95 : gap < 0.88)) {
+    const goalRd = rdFor(c, mq * 1.02);
+    if (goalRd > c.rdPct + 0.004) {
+      add({
+        id: `quality-${c.id}`, severity: 'tip', title: `${c.name}'s quality trails its rivals`,
+        body: `Customers rate ${c.name} at ${c.quality.toFixed(2)} against ${mq.toFixed(2)} for the market, so fewer of them stay and fewer new ones come. Raising R&D from ${fmtPct(c.rdPct, 0)} to ${fmtPct(goalRd, 0)} of sales (about ${fmtMoney((weekly(goalRd) - weekly(c.rdPct)) * 4.3)} more a month) closes most of the gap in about ${Math.round(400 / 30)} months.${product ? '' : ' For materials it matters less than price, so do this once you are profitable.'}`,
+        action: { type: 'command', label: `R&D to ${fmtPct(goalRd, 0)}`, cmd: spend(c.marketingPct, goalRd) },
+      });
+    }
+  }
+  // Unhappy customers leave
+  const sat = c.satisfaction ?? 0.75;
+  if (sat < 0.55 && w.day - c.founded > 20) {
+    const fill = fillRate(c);
+    const why = fill < 0.9
+      ? `you only filled ${fmtPct(fill, 0)} of their orders. Keep more stock (Automation: inventory days), hire, or expand`
+      : c.priceMult > 1.08
+        ? `your price is ${fmtPct(c.priceMult - 1, 0)} above the market. A smaller premium keeps them`
+        : 'your quality is below the market. More R&D lifts it';
+    add({ id: `unhappy-${c.id}`, severity: sat < 0.45 ? 'warn' : 'tip', title: `${c.name}'s customers are unhappy`, body: `Satisfaction is ${Math.round(sat * 100)}% and unhappy customers drift to rivals: ${why}.`, action: { type: 'openCompany', label: 'Open', companyId: c.id } });
+  }
+  // Machines
+  const cond = c.condition ?? 1;
+  const maint = c.maintenance ?? 'normal';
+  if (cond < 0.75 && maint !== 'high') {
+    const extra = maintCostPerDay(w, { ...c, maintenance: 'high' }) - maintCostPerDay(w, c);
+    add({
+      id: `machines-${c.id}`, severity: cond < 0.6 ? 'warn' : 'tip', title: `${c.name}'s machines are wearing out`,
+      body: `Condition is ${Math.round(cond * 100)}%: workers make ${Math.round((1 - (0.85 + 0.15 * cond)) * 100)}% less and breakdowns are ${Math.round(4 * (1 - cond) * 100)}% more likely. High maintenance (about ${fmtMoney(extra)} more a day) brings them back over a few months.`,
+      action: { type: 'command', label: 'High maintenance', cmd: { type: 'setMaintenance', companyId: c.id, level: 'high' } },
+    });
+  } else if (maint === 'high' && cond > 0.97) {
+    add({ id: `machines-${c.id}`, severity: 'tip', title: `${c.name}'s machines are in top shape`, body: 'Normal maintenance keeps them there for less.', action: { type: 'command', label: 'Normal maintenance', cmd: { type: 'setMaintenance', companyId: c.id, level: 'normal' } } });
+  }
+  // Customers who pay late
+  const owed = c.receivables ?? 0;
+  if (owed > 0 && c.cash < owed * 0.25 && c.sum30.netIncome > 0) {
+    add({
+      id: `owed-${c.id}`, severity: 'tip', title: `Customers owe ${c.name} ${fmtMoney(owed)}`,
+      body: `Business customers pay over about ${RECEIVABLE_DAYS} days, so profit arrives as cash later. With only ${fmtMoney(c.cash)} in the bank, one big bill means borrowing. Paying yourself smaller dividends for a while builds a buffer.`,
+      action: c.automation.dividendPct > 25 ? { type: 'command', label: 'Dividends to 25%', cmd: { type: 'setAutomation', companyId: c.id, automation: { dividendPct: 25 } } } : { type: 'openCompany', label: 'Open', companyId: c.id },
+    });
+  }
+  // Fading products
+  const trend = w.goods[c.good]?.trend ?? 1;
+  if (product && trend < 0.9) {
+    add({ id: `fading-${c.id}`, severity: 'tip', title: `Demand for ${def.name.toLowerCase()} is fading`, body: `Households buy ${fmtPct(1 - trend, 0)} less ${def.name.toLowerCase()} than when the game began, and the trend is still down. Avoid big upgrades here; growing markets like AI, robots and online stores are better places for new money.`, action: { type: 'openPlanner', label: 'See growing markets' } });
+  }
 }
 
 /** An event from the news that is still running, e.g. a demand boom (+1) or slump (-1) for a good. */
@@ -582,6 +682,34 @@ export function computeAdvice(w: WorldState): Advice[] {
     out.push({ id: 'idle', severity: 'tip', title: `${fmtMoney(w.player.cash)} is sitting idle`, body: 'Start another company or buy shares so your money works for you.', action: { type: 'openPlanner', label: 'Find a business' } });
   }
 
+  // The monthly inbox
+  const cards = openCards(w);
+  if (cards.length) {
+    const soon = Math.min(...cards.map((x) => x.expires - w.day));
+    out.push({
+      id: 'inbox', severity: soon <= 2 ? 'warn' : 'tip', title: `${cards.length} decision${cards.length === 1 ? '' : 's'} in your inbox`,
+      body: `${cards[0].title}.${soon <= 2 ? ` The oldest is decided for you in ${Math.max(0, soon)} day${soon === 1 ? '' : 's'}.` : ''}`,
+      action: { type: 'openInbox', label: 'Open inbox' },
+    });
+  }
+  const timedOut = inbox(w).filter((x) => x.answered?.by === 'timeout' && w.day - x.answered.day < 30).length;
+  const unmanaged = mine.filter((c) => (c.manager ?? 'none') === 'none');
+  if (timedOut >= 2 && unmanaged.length >= 2) {
+    const c = unmanaged.sort((a, b) => b.sum30.revenue - a.sum30.revenue)[0];
+    const cost = managerCostPerDay(w, { ...c, manager: 'basic' });
+    out.push({
+      id: 'manager', severity: 'tip', title: 'Decisions are timing out',
+      body: `${timedOut} decisions ran out this month and took the default answer. A manager for ${c.name} (${MANAGERS.basic.label.toLowerCase()}, about ${fmtMoney(cost)} a day) answers its inbox for you with safe choices.`,
+      action: { type: 'command', label: 'Hire a manager', cmd: { type: 'setManager', companyId: c.id, manager: 'basic' } },
+    });
+  }
+  const cy = cycleOf(w);
+  if (mine.length && cy.phase === 'warning') {
+    out.push({ id: 'recession', severity: 'warn', title: 'A recession is coming', body: `Economists expect a downturn in about ${Math.max(1, Math.round((cy.until - w.day) / 7))} weeks. Shoppers will buy about 10% less (luxuries more, care and power less). Build cash, avoid new loans and hold off on big upgrades until it passes.` });
+  } else if (mine.length && cy.phase === 'recession') {
+    out.push({ id: 'recession', severity: 'tip', title: 'Riding out the recession', body: 'Keep your customers happy rather than chasing price: buyers you keep now are the first to come back. Firms with cash can pick up bargains at bankruptcy auctions.' });
+  }
+
   // Rivals who refuse to deal with you
   for (const rv of w.rivals) {
     if (rv.relation <= -40) {
@@ -646,7 +774,7 @@ export function opportunities(w: WorldState): Opportunity[] {
     if (mk.imported > demand * 0.05 || gap > 0) tags.push('shortage');
     if (trend > 0.06 || w.effects.some((e) => e.kind === 'goodDemand' && e.target === g && e.delta > 0)) tags.push('hot');
     if (gap < -0.25 && sellers.length >= 2) tags.push('crowded');
-    if (startCost(g) <= 120_000) tags.push('cheap');
+    if (startCost(g) <= 250_000) tags.push('cheap');
     const licence = licenceFee(w, GOODS[g].industry);
     if (licence > 0) tags.push('locked');
     const reason = tags.includes('shortage')

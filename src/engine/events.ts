@@ -119,7 +119,7 @@ function accidents(w: WorldState): void {
     if (c.bankrupt || w.day - c.founded < 20 || (c.damage && c.damage.untilDay > w.day)) continue;
     const busy = c.isPlayer && w.pending.some((e) => e.companyId === c.id);
     if (busy) continue;
-    const kind = chance(r, FIRE_CHANCE) ? 'fire' : chance(r, BREAKDOWN_CHANCE * (c.worn ? 3 : 1)) ? 'breakdown' : chance(r, INSPECTION_CHANCE) ? 'inspection' : null;
+    const kind = chance(r, FIRE_CHANCE) ? 'fire' : chance(r, BREAKDOWN_CHANCE * (c.worn ? 3 : 1) * (1 + 4 * (1 - (c.condition ?? 1)))) ? 'breakdown' : chance(r, INSPECTION_CHANCE) ? 'inspection' : null;
     if (!kind) continue;
     if (!c.isPlayer) { aiAccident(w, c, kind); continue; }
     const id = `ev${++w.seq}`;
@@ -201,18 +201,8 @@ function maybePlayerDilemma(w: WorldState): void {
   const roll = next(w.rng);
   let ev: PendingEvent | null = null;
   const id = `ev${++w.seq}`;
-  if (roll < 0.35) {
-    ev = {
-      id, template: 'union', day: w.day, companyId: c.id, rivalId: null, expiresDay: w.day + 10,
-      title: 'Union demands a raise',
-      body: `Workers at ${c.name} want a 10% pay rise. Morale is ${Math.round(c.morale * 100)}%.`,
-      choices: [
-        { id: 'accept', label: 'Accept 10% raise', detail: '+Morale · Higher wages' },
-        { id: 'counter', label: 'Counter with 4%', detail: 'Small morale boost' },
-        { id: 'reject', label: 'Reject', detail: '-Morale · Strike risk' },
-      ],
-    };
-  } else if (roll < 0.65 && contractBuyer(w, c)) {
+  // Pay claims and ad pitches now arrive in the weekly inbox
+  if (roll < 0.55 && contractBuyer(w, c)) {
     const buyer = contractBuyer(w, c)!;
     const rv = w.rivals.find((x) => x.id === buyer.ownerId);
     const qty = Math.max(1, Math.round(Math.min(dailyNeed(buyer, c.good) * 0.6, c.capacity * 0.5)));
@@ -227,7 +217,7 @@ function maybePlayerDilemma(w: WorldState): void {
       ],
     };
     ev.amount = qty;
-  } else if (roll < 0.85 && !c.ticker && companyValue(c) > 200_000 && w.rivals.some((x) => x.relation < 30)) {
+  } else if (!c.ticker && companyValue(c) > 200_000 && w.rivals.some((x) => x.relation < 30)) {
     const rv = w.rivals.find((x) => x.focus.includes(c.industry) && x.relation < 30) ?? pick(w.rng, w.rivals.filter((x) => x.relation < 30));
     const offer = companyValue(c) * range(w.rng, 1.15, 1.45);
     ev = {
@@ -241,18 +231,6 @@ function maybePlayerDilemma(w: WorldState): void {
       ],
     };
     ev.amount = offer;
-  } else {
-    const cost = Math.max(15_000, c.sum30.revenue * 0.08);
-    ev = {
-      id, template: 'campaign', day: w.day, companyId: c.id, rivalId: null, expiresDay: w.day + 10,
-      title: 'Ad agency pitches a campaign',
-      body: `A national campaign for ${c.name} costs ${fmtMoney(cost)} from company cash and would lift brand strength.`,
-      choices: [
-        { id: 'buy', label: `Run it (${fmtMoney(cost)})`, detail: '+Brand · -Cash' },
-        { id: 'pass', label: 'Pass', detail: 'No change' },
-      ],
-    };
-    ev.amount = cost;
   }
   if (ev) {
     w.pending.push(ev);

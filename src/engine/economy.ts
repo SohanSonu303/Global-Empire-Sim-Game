@@ -10,11 +10,11 @@
 import { deplete, extractionMult, isRawMine, RAW_UPKEEP, reserveCapMult } from './resources';
 import { premiumPerDay } from './disasters';
 import { GOODS, GOOD_IDS, IMPORT_PREMIUM, fixedAt } from './data';
-import { clamp, damageMult, drawCredit, emptyDay, finishDay, importPrice, productivity, refPrice, salaryOf, sellPrice, wageIndex, worldIdx } from './company';
-import type { Company, DayResult, GoodId, GoodMarket, WorldState } from './types';
+import { boostMult, clamp, damageMult, drawCredit, emptyDay, finishDay, importPrice, maintCostPerDay, managerCostPerDay, productivity, reachOf, refPrice, salaryOf, sellPrice, wageIndex, worldIdx } from './company';
+import type { Company, Contract, DayResult, GoodId, GoodMarket, WorldState } from './types';
 import { campaignMult, bookDelivery, jobPace, switchMult } from './strategy';
 import { TRAIT_RATES, hasTrait, noteRawSaved } from './traits';
-import { addStock, isStoring, roomFor, store, takeStock, totalRoom } from './warehouse';
+import { addStock, isStoring, roomFor, store, takeStock, totalRoom, warehouseShare } from './warehouse';
 import { FUNDING_SHARE, RESERVE_SPEED, expectedLoss, isBank, lenderOf, loanBooks, loanRate } from './banks';
 
 interface Plan {
@@ -25,6 +25,10 @@ interface Plan {
   vcSpend: number;
   attract: number;
   mktDemand: number;
+  /** Units today's supply deals may still take (your output split) */
+  dealLeft: number;
+  /** Units today's contracts and tenders may still take from the plant */
+  jobLeft: number;
 }
 
 interface Request {
@@ -32,6 +36,9 @@ interface Request {
   good: GoodId;
   qty: number;
 }
+
+/** Business customers pay invoices over about this many days */
+export const RECEIVABLE_DAYS = 30;
 
 export function createGoodsMarket(): Record<GoodId, GoodMarket> {
   const out = {} as Record<GoodId, GoodMarket>;
@@ -58,6 +65,13 @@ function addInput(c: Company, good: GoodId, qty: number, unitCost: number): void
   c.inputs[good] = { qty: total, cost: (cur.qty * cur.cost + qty * unitCost) / total };
 }
 
+/** Units set aside for a deal go back into the selling company's stock */
+export function returnBanked(w: WorldState, k: Contract): void {
+  const c = w.companies.find((x) => x.id === k.sellerId);
+  if (c && (k.banked ?? 0) > 0) c.inventory += k.banked!;
+  k.banked = 0;
+}
+
 export function operateEconomy(w: WorldState): void {
   const m = w.macro;
   const pl = m.priceLevel;
@@ -77,8 +91,12 @@ export function operateEconomy(w: WorldState): void {
     const expected = Math.max(c.last.demand, c.capacity * 0.25);
     const keep = expected * (1 + c.automation.inventoryDays);
     // With a warehouse, the plant keeps running when its own stock is full and stores the extra
-    const room = isStoring(w, c) ? totalRoom(w, c.good) : 0;
-    const produced = clamp(keep - c.inventory + room, 0, qMax);
+    const storing = isStoring(w, c);
+    const room = storing && c.automation.toWarehouse ? totalRoom(w, c.good) : 0;
+    // Your output split: this share of each day's output goes straight to the warehouse
+    const whShare = storing ? warehouseShare(w, c) : 0;
+    const toStore = Math.min(qMax * whShare, storing ? totalRoom(w, c.good) : 0);
+    const produced = clamp(keep - c.inventory + room + toStore, 0, qMax);
 
     let matCost = 0;
     for (const i of def.inputs) {
@@ -87,13 +105,14 @@ export function operateEconomy(w: WorldState): void {
       matCost += use * st.cost;
       st.qty = Math.max(0, st.qty - use);
     }
-    const vcSpend = produced * def.vc * pl * extractionMult(c);
+    const vcSpend = produced * def.vc * pl * extractionMult(c) * boostMult(c, 'cost');
     deplete(c, produced);
     if (produced > 0) {
       const total = c.inventory + produced;
       c.invCost = (c.inventory * c.invCost + matCost + vcSpend) / total;
       c.inventory = total;
       r.unitMaterialCost = (matCost + vcSpend) / produced;
+      if (whShare > 0) c.inventory -= store(w, c.good, Math.min(c.inventory, produced * whShare), c.invCost);
       if (room > 0 && c.inventory > keep) c.inventory -= store(w, c.good, c.inventory - keep, c.invCost);
     } else {
       r.unitMaterialCost = c.last.unitMaterialCost;
@@ -102,7 +121,10 @@ export function operateEconomy(w: WorldState): void {
     r.laborCap = laborCap;
     r.materialCap = materialCap;
     r.produced = produced;
-    const plan: Plan = { c, r, avail: c.inventory, price: sellPrice(w, c), vcSpend, attract: 0, mktDemand: 0 };
+    // Split limits: most of a day's output that deals and contracts may take (unused share goes to the market)
+    const out = Math.max(produced, c.sum30.produced / 30, 1);
+    const plan: Plan = { c, r, avail: c.inventory, price: sellPrice(w, c), vcSpend, attract: 0, mktDemand: 0,
+      dealLeft: c.split ? c.split.deals * out : Infinity, jobLeft: c.split ? c.split.contracts * out : Infinity };
     r.price = plan.price;
     plans.push(plan);
     byId.set(c.id, plan);
@@ -162,7 +184,8 @@ export function operateEconomy(w: WorldState): void {
       const seller = j.companyId ? byId.get(j.companyId) : undefined;
       if (!seller) continue;
       const want = jobPace(w, j);
-      const fromPlant = Math.min(want, Math.max(0, seller.avail));
+      const fromPlant = Math.min(want, Math.max(0, seller.avail), Math.max(0, seller.jobLeft));
+      seller.jobLeft -= fromPlant;
       seller.avail -= fromPlant;
       const fromStore = takeStock(w, g, want - fromPlant).qty;
       const paid = bookDelivery(w, j, fromPlant + fromStore);
@@ -178,8 +201,14 @@ export function operateEconomy(w: WorldState): void {
       const seller = byId.get(k.sellerId);
       const buyer = byId.get(k.buyerId);
       if (!seller || !buyer) continue;
-      const qty = Math.min(k.qtyPerDay, Math.max(0, seller.avail), Math.max(0, buyer.c.cash / Math.max(1e-6, k.price)));
-      pay(buyer, seller, g, qty, k.price);
+      const canPay = Math.max(0, buyer.c.cash / Math.max(1e-6, k.price));
+      // Units you sent from the warehouse go first and do not use the plant's output
+      const banked = Math.min(k.qtyPerDay, k.banked ?? 0, canPay);
+      if (banked > 0) { k.banked! -= banked; seller.avail += banked; pay(buyer, seller, g, banked, k.price); }
+      const fromPlant = Math.min(k.qtyPerDay - banked, Math.max(0, seller.avail), canPay - banked, Math.max(0, seller.dealLeft));
+      seller.dealLeft -= fromPlant;
+      pay(buyer, seller, g, fromPlant, k.price);
+      const qty = banked + fromPlant;
       seller.r.contractSold += qty;
       k.delivered += qty;
       k.shortfall += Math.max(0, k.qtyPerDay - qty);
@@ -206,7 +235,7 @@ export function operateEconomy(w: WorldState): void {
     const avgPrice = capW > 0 ? sellers.reduce((s, p) => s + p.price * p.c.capacity, 0) / capW : refPrice(w, g);
     // Regulated care is needed in good times and bad: income moves it only a little
     const finalMult = def.reg ? 1 + (incomeMult - 1) * 0.3 : def.tier === 'product' || g === 'electricity' || g === 'water' ? incomeMult : 1;
-    const finalD = def.d0 * Math.pow(avgPrice / base, -def.elasticity) * finalMult * effectMult(w, 'goodDemand', g);
+    const finalD = def.d0 * Math.pow(avgPrice / base, -def.elasticity) * finalMult * effectMult(w, 'goodDemand', g) * (mk.trend ?? 1);
     // Your warehouse buy orders bid for local supply like any business buyer (no imports)
     const orders = (w.play?.buyOrders ?? []).filter((o) => o.good === g && refPrice(w, g) <= o.maxPrice);
     const whWant = orders.map((o) => {
@@ -223,7 +252,8 @@ export function operateEconomy(w: WorldState): void {
       // Business materials are bought on price (and a little quality); consumer products also on brand.
       const appeal = def.tier === 'product' ? p.c.brand * p.c.quality : Math.sqrt(p.c.quality);
       const camp = w.play ? campaignMult(w, p.c) : 1;
-      p.attract = Math.pow(p.price / avgPrice, -def.switchElasticity * switchMult(p.c)) * appeal * camp * Math.pow(p.c.capacity, 0.85);
+      // Buyers pick among the sellers they know: a new company has few customers until it wins them over
+      p.attract = Math.pow(p.price / avgPrice, -def.switchElasticity * switchMult(p.c)) * appeal * camp * Math.pow(p.c.capacity, 0.85) * reachOf(p.c) * boostMult(p.c, 'attract');
       sumA += p.attract;
     }
     let soldOpen = 0;
@@ -348,7 +378,7 @@ export function operateEconomy(w: WorldState): void {
     c.inventory = Math.max(0, p.avail) * 0.997;
     r.grossProfit = r.revenue - r.cogs;
     r.wages = c.workers * salaryOf(c) * c.salaryMult * wageIndex(w);
-    r.fixed = fixedAt(c.good, c.level) * pl * (c.fixedScale ?? 1) * (isRawMine(c) ? RAW_UPKEEP : 1) + premiumPerDay(c);
+    r.fixed = fixedAt(c.good, c.level) * pl * (c.fixedScale ?? 1) * (isRawMine(c) ? RAW_UPKEEP : 1) + premiumPerDay(c) + maintCostPerDay(w, c) + managerCostPerDay(w, c);
     r.marketing = r.revenue * c.marketingPct;
     r.rd = r.revenue * c.rdPct;
     r.opex = r.wages + r.fixed + r.marketing + r.rd;
@@ -366,12 +396,24 @@ export function operateEconomy(w: WorldState): void {
     r.tax = Math.max(0, pretax) * m.taxRate;
     r.netIncome = pretax - r.tax;
     // Purchases were already paid; production's other variable cost is paid now.
-    c.cash += r.revenue - p.vcSpend - r.opex + r.interestIncome - r.fundingCost - r.loanLosses - r.interest - r.tax;
+    // Business customers of your companies pay on account: the money arrives over about a month.
+    const onAccount = c.isPlayer && GOODS[c.good].tier !== 'product' ? r.revenue : 0;
+    let collected = 0;
+    if (c.isPlayer && (onAccount > 0 || c.receivables)) {
+      c.receivables = (c.receivables ?? 0) + onAccount;
+      collected = c.receivables / RECEIVABLE_DAYS;
+      c.receivables -= collected;
+    }
+    c.cash += r.revenue - onAccount + collected - p.vcSpend - r.opex + r.interestIncome - r.fundingCost - r.loanLosses - r.interest - r.tax;
     finishDay(w, c, r);
   }
 
   // Expired contracts
-  if (w.contracts.length) w.contracts = w.contracts.filter((k) => k.endDay >= w.day);
+  if (w.contracts.length) {
+    // Stock set aside for a finished deal goes back to the seller to sell
+    for (const k of w.contracts) if (k.endDay < w.day && (k.banked ?? 0) > 0) returnBanked(w, k);
+    w.contracts = w.contracts.filter((k) => k.endDay >= w.day);
+  }
 }
 
 /** Input consumption of a good per day across all its users (planned output x recipe). */

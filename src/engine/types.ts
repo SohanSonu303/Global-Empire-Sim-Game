@@ -78,6 +78,8 @@ export interface GoodMarket {
   /** demand / domestic supply, smoothed (>1 = shortage) */
   tightness: number;
   hist: { day: number; price: number }[];
+  /** Long-run household demand trend (1 = today's): rising and fading products */
+  trend?: number;
 }
 
 /** A supply contract: seller delivers qtyPerDay to buyer at a fixed unit price until endDay. */
@@ -93,6 +95,8 @@ export interface Contract {
   /** Units short of the promise so far (seller penalty basis) */
   shortfall: number;
   delivered: number;
+  /** Units sent from your warehouse, delivered before the plant's own output */
+  banked?: number;
 }
 
 export interface Explanation {
@@ -100,6 +104,12 @@ export interface Explanation {
   lines: { label: string; value: number; op?: '+' | '-' | '=' | 'x' | ''; fmt?: 'money' | 'pct' | 'num' }[];
   note?: string;
 }
+
+/** Where warehouse stock can be sent */
+export type StockDest = 'market' | 'contracts' | 'deals';
+
+/** Shares of a day's output (0..1). The market gets whatever is left. */
+export interface OutputSplit { deals: number; contracts: number; warehouse: number }
 
 export interface Automation {
   /** Keep this many days of expected sales in inventory */
@@ -159,6 +169,48 @@ export interface DayResult {
   loanLosses: number;
 }
 
+export type MaintLevel = 'low' | 'normal' | 'high';
+export type ManagerId = 'none' | 'basic' | 'pro';
+
+/** A temporary multiplier: attract (how many buyers pick you), price, productivity or variable cost. */
+export interface Boost {
+  kind: 'attract' | 'price' | 'productivity' | 'cost';
+  mult: number;
+  until: number;
+  why: string;
+}
+
+/** A monthly inbox card: a decision with trade-offs. Unanswered cards take the fallback choice when they expire. */
+export interface InboxCard {
+  id: string;
+  kind: string;
+  day: number;
+  expires: number;
+  /** Who it's from: "Plant manager", "Union rep", a rival's name ... */
+  from: string;
+  companyId?: string;
+  rivalId?: string;
+  title: string;
+  body: string;
+  choices: EventChoice[];
+  /** Taken when nobody answers in time */
+  fallback: string;
+  /** What a careful manager picks, and what a top manager picks */
+  safe: string;
+  best: string;
+  amount?: number;
+  answered?: { choiceId: string; message: string; day: number; by: 'you' | 'manager' | 'timeout' };
+}
+
+/** The economy's business cycle */
+export interface Cycle {
+  phase: 'normal' | 'warning' | 'recession' | 'recovery';
+  /** Day the current phase ends */
+  until: number;
+  /** Day the next downturn warning is due */
+  nextDown: number;
+}
+
 /** An outside owner of part of a private company (an investor, a rival, or you). */
 export type LoanReason = 'materials' | 'hiring' | 'cash buffer' | 'repairs' | 'you borrowed' | 'expansion';
 
@@ -200,6 +252,8 @@ export interface Company {
   inputs: Partial<Record<GoodId, { qty: number; cost: number }>>;
   /** Discount given to sister companies with the same owner (0..0.5) */
   sisterDiscount: number;
+  /** Your split of each day's output: most that deals, contracts and the warehouse may take (the market gets the rest). Unset: no limits. */
+  split?: OutputSplit;
   cash: number;
   debt: number;
   /** % of revenue to marketing / R&D (AI or manual baseline) */
@@ -227,6 +281,26 @@ export interface Company {
   bankId?: string;
   /** Banks only: multiplier on the loan margin the bank charges (1 = normal) */
   loanRateMult?: number;
+  /** Customers who know and trust the company, relative to an established firm (1). New companies start low and win buyers over months. */
+  reach?: number;
+  /** Customer satisfaction 0..1: orders filled, quality and price against the market */
+  satisfaction?: number;
+  /** Machine condition 0..1: wears with use, restored by maintenance */
+  condition?: number;
+  /** Maintenance budget (normal unless changed) */
+  maintenance?: MaintLevel;
+  /** Staff experience: new hires start below 1 and learn on the job; training lifts it */
+  skill?: number;
+  /** Money business customers still owe you (they pay over about a month) */
+  receivables?: number;
+  /** Who runs the company day to day (player companies; none = you do) */
+  manager?: ManagerId;
+  /** Temporary effects from rival moves, deals and decisions */
+  boosts?: Boost[];
+  /** Slow average of market share: rivals compare today's share against it */
+  shareRef?: number;
+  /** Day the company last struck back at a newcomer */
+  lastReactDay?: number;
   /** Damage from an accident: output is limited to mult x capacity until untilDay */
   damage?: { mult: number; untilDay: number; cause: string };
   /** Patched-up machines break down more often until replaced */
@@ -539,7 +613,8 @@ export interface Warehouse {
   id: string;
   name: string;
   level: number;
-  stock: Partial<Record<GoodId, { qty: number; cost: number }>>;
+  /** since: average day the units arrived (older stock spoils faster) */
+  stock: Partial<Record<GoodId, { qty: number; cost: number; since?: number }>>;
   /** Most of this warehouse's space each product may use (0..1) */
   limits: Partial<Record<GoodId, number>>;
   /** Auto-sell rules: release stock when the price is this much above what you paid, or when there is a shortage */
@@ -635,6 +710,12 @@ export interface Play {
   disasters: DisasterRecord[];
   /** Trait income collected during the month */
   traitAcc?: { stockGain: number; dividends: number; dealGain: number; jobBonus: number; rawSaved: number; opsSaved: number };
+  /** Weekly decisions (newest last, answered ones kept for a while) */
+  inbox?: InboxCard[];
+  /** Day each kind of card last came up for each company ("companyId:kind") */
+  cardLast?: Record<string, number>;
+  /** Business cycle state */
+  cycle?: Cycle;
 }
 
 export interface WorldState {
@@ -677,6 +758,7 @@ export type Command =
   | { type: 'setSalary'; companyId: string; salaryMult: number }
   | { type: 'setSpend'; companyId: string; marketingPct: number; rdPct: number }
   | { type: 'setAutomation'; companyId: string; automation: Partial<Automation> }
+  | { type: 'setSplit'; companyId: string; split: OutputSplit | null }
   | { type: 'borrow'; companyId: string; amount: number }
   | { type: 'repay'; companyId: string; amount: number }
   | { type: 'transfer'; companyId: string; amount: number } // + to company, - to player
@@ -707,6 +789,7 @@ export type Command =
   | { type: 'upgradeWarehouse'; id: string }
   | { type: 'setWarehouseLimit'; id: string; good: GoodId; share: number }
   | { type: 'releaseStock'; id: string; good: GoodId; qty: number }
+  | { type: 'sendStock'; id: string; good: GoodId; qty: number; to: StockDest }
   | { type: 'setBuyOrder'; warehouseId: string; good: GoodId; perDay: number; maxPrice: number }
   | { type: 'setSellRule'; id: string; good: GoodId; above?: number; shortage?: boolean }
   | { type: 'sellToRivals'; id: string; good: GoodId; qty: number }
@@ -716,7 +799,10 @@ export type Command =
   | { type: 'endWar'; warId: string }
   | { type: 'setInsurance'; companyId: string; on: boolean }
   | { type: 'explore'; companyId: string }
-  | { type: 'bidAuction'; auctionId: string; amount: number };
+  | { type: 'bidAuction'; auctionId: string; amount: number }
+  | { type: 'answerInbox'; cardId: string; choiceId: string }
+  | { type: 'setMaintenance'; companyId: string; level: MaintLevel }
+  | { type: 'setManager'; companyId: string; manager: ManagerId };
 
 export interface CommandResult {
   ok: boolean;
