@@ -19,6 +19,11 @@ import type { CommandResult, Company, GoodId, PendingEvent, Rival, WorldState } 
 
 /** Most private companies one tycoon will found. */
 export const MAX_FOUNDED = 4;
+/** Net margin across a market that tempts newcomers in */
+export const ENTRY_MARGIN = 0.18;
+/** Margin that draws a challenger into a market with only one maker (regulated ones pay less) */
+export const SOLE_MARGIN = 0.08;
+export const SOLE_REG_MARGIN = 0.04;
 /** Days between a tycoon's own new companies. */
 const FOUND_GAP = 180;
 /** Days between any two tycoon offers to you. */
@@ -205,6 +210,39 @@ export function resolveTycoonEvent(w: WorldState, ev: PendingEvent, c: Company, 
 }
 
 /** Monthly: each tycoon may found a company or make you an offer. */
+/**
+ * Fat profits draw newcomers: when a market has been tight and very profitable, the richest rival
+ * with no big stake in it launches a company there. This is what keeps margins from staying high forever.
+ */
+export function marketEntry(w: WorldState): void {
+  if (!chance(w.rng, 0.4)) return;
+  const picks: { g: GoodId; score: number }[] = [];
+  for (const g of Object.keys(w.goods) as GoodId[]) {
+    if (g === 'banking') continue;
+    const cs = w.companies.filter((c) => c.good === g && !c.bankrupt);
+    if (!cs.length) continue;
+    const rev = cs.reduce((s, c) => s + c.sum30.revenue, 0);
+    const margin = rev > 0 ? cs.reduce((s, c) => s + c.sum30.netIncome, 0) / rev : 0;
+    const tight = w.goods[g].tightness;
+    // A market with a single maker is open to a challenger on a much lower margin, permit or not
+    const sole = new Set(cs.map((c) => c.ownerId)).size === 1;
+    const bar = sole ? (GOODS[g].reg ? SOLE_REG_MARGIN : SOLE_MARGIN) : GOODS[g].reg ? Infinity : ENTRY_MARGIN;
+    const minTight = sole ? 0.75 : 0.88;
+    if (margin < bar || tight < minTight) continue;
+    if (w.companies.some((c) => c.good === g && c.id.startsWith('t') && w.day - c.founded < 365)) continue;
+    const score = (margin - bar) + (tight - minTight) + (sole ? 0.1 : 0);
+    picks.push({ g, score });
+  }
+  // Best market first; if no rival can afford it, try the next one
+  for (const { g } of picks.sort((a, b) => b.score - a.score)) {
+    const sellers = w.companies.filter((c) => c.good === g && !c.bankrupt);
+    const total = sellers.reduce((s, c) => s + c.capacity, 0);
+    const shareOf = (id: string) => sellers.filter((c) => c.ownerId === id).reduce((s, c) => s + c.capacity, 0) / Math.max(1, total);
+    const who = [...w.rivals].filter((r) => shareOf(r.id) < 0.2).sort((a, b) => b.cash - a.cash);
+    for (const r of who.slice(0, 3)) if (tycoonFound(w, r, g)) return;
+  }
+}
+
 export function monthlyTycoons(w: WorldState): void {
   const list = tycoons(w);
   const lastOffer = Math.max(-Infinity, ...list.map((r) => r.lastOfferDay ?? -Infinity));

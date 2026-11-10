@@ -3,10 +3,11 @@ import { useState, type ReactNode } from 'react';
 import { useGame } from '../../store/game';
 import { GOODS, INDUSTRIES, MAX_LEVEL, maxPriceMult } from '../../engine/data';
 import {
-  companyValue, companyValueExplain, creditLimit, damageMult, repayBuffer, nextUpgradeCost, outputExplain, pnlExplain, productivity, refPrice, unitEconomics, workersForDemand,
+  wageIndex, companyValue, companyValueExplain, creditLimit, damageMult, repayBuffer, nextUpgradeCost, outputExplain, pnlExplain, productivity, refPrice, unitEconomics, workersForDemand,
 } from '../../engine/company';
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import { SupplyTab } from './Supply';
+import { ResearchTab } from './Research';
 import type { Company, DayResult, WorldState } from '../../engine/types';
 import { Cutaway } from '../art/art';
 import { IndustrialPark } from '../art/Park';
@@ -28,13 +29,13 @@ import type { CampaignSize } from '../../engine/types';
 import { AUTO_EXPLORE_AT, DEPLETION_DAYS, RAW_UPKEEP, THIN_RESERVES, exploreCost, extractionMult, isRawMine, reserveCapMult, reservesOf } from '../../engine/resources';
 import { COVER, PREMIUM_RATE, disasterInfo } from '../../engine/disasters';
 
-type T = 'overview' | 'supply' | 'financials' | 'owners' | 'operations' | 'employees' | 'automation';
+type T = 'overview' | 'supply' | 'financials' | 'owners' | 'operations' | 'employees' | 'research' | 'automation';
 
-export function CompanyScreen({ id }: { id: string }) {
+export function CompanyScreen({ id, tab: startTab }: { id: string; tab?: string }) {
   const w = useGame((s) => s.world)!;
   const back = useGame((s) => s.back);
   const dispatch = useGame((s) => s.dispatch);
-  const [tab, setTab] = useState<T>('overview');
+  const [tab, setTab] = useState<T>((startTab as T) ?? 'overview');
   const [sheet, setSheet] = useState<'hire' | 'price' | null>(null);
   const c = w.companies.find((x) => x.id === id);
   if (!c) return <Screen><p className="pt-6 text-muted">Company not found.</p></Screen>;
@@ -69,6 +70,7 @@ export function CompanyScreen({ id }: { id: string }) {
               { id: 'owners', label: isBank(c) ? 'Owners & Loans' : 'Owners & Bank' },
               { id: 'operations', label: 'Operations' },
               { id: 'employees', label: 'Employees' },
+              { id: 'research', label: 'R&D', disabled: !mine },
               { id: 'automation', label: 'Automation', disabled: !mine },
             ]}
           />
@@ -80,6 +82,7 @@ export function CompanyScreen({ id }: { id: string }) {
           {tab === 'owners' && <OwnersTab c={c} w={w} />}
           {tab === 'operations' && <Operations c={c} w={w} />}
           {tab === 'employees' && <Employees c={c} />}
+          {tab === 'research' && mine && <ResearchTab c={c} />}
           {tab === 'automation' && mine && <AutomationTab c={c} />}
         </div>
       </Screen>
@@ -293,7 +296,7 @@ function DebtNote({ c }: { c: Company }) {
 function Operations({ c, w }: { c: Company; w: WorldState }) {
   const dispatch = useGame((s) => s.dispatch);
   const ref = refPrice(w, c.good);
-  const ue = unitEconomics(w, c.good, { level: c.level, util: Math.max(0.2, c.last.sold / Math.max(1, c.capacity)), salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs });
+  const ue = unitEconomics(w, c.good, { level: c.level, util: Math.max(0.2, c.last.sold / Math.max(1, c.capacity)), salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
   return (
     <div className="space-y-3">
       <Card className="p-3">
@@ -325,6 +328,7 @@ function Operations({ c, w }: { c: Company; w: WorldState }) {
 
 function Employees({ c }: { c: Company }) {
   const dispatch = useGame((s) => s.dispatch);
+  const w = useGame((s) => s.world)!;
   const def = INDUSTRIES[c.industry];
   return (
     <Card className="p-3">
@@ -333,7 +337,8 @@ function Employees({ c }: { c: Company }) {
         <Row label="Needed for demand" value={workersForDemand(c).toLocaleString()} />
         <Row label="Output per worker / day" value={productivity(c).toFixed(1)} />
         <Row label="Salary vs market" value={`${Math.round(c.salaryMult * 100)}%`} />
-        <Row label="Market salary / day" value={fmtMoney(def.salary)} />
+        <Row label="Market salary / day" value={fmtMoney(def.salary * wageIndex(w, c.industry))} />
+        <Row label={`${def.name} labour market`} value={<LabourNote w={w} c={c} />} />
         <Row label="Morale" value={<Mood v={c.morale} />} />
       </div>
       {c.isPlayer && !c.bankrupt && (
@@ -580,7 +585,7 @@ function PriceSheet({ c, w, onClose }: { c: Company; w: WorldState; onClose: () 
   const dispatch = useGame((s) => s.dispatch);
   const [pm, setPm] = useState(c.priceMult);
   const ref = refPrice(w, c.good);
-  const vc = unitEconomics(w, c.good, { level: c.level, util: 0.85, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs }).total;
+  const vc = unitEconomics(w, c.good, { level: c.level, util: 0.85, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance }).total;
   return (
     <BottomSheet
       open
@@ -602,4 +607,11 @@ function PriceSheet({ c, w, onClose }: { c: Company; w: WorldState; onClose: () 
       <p className="text-xs text-dim mt-3">{GOODS[c.good].tier === 'product' ? 'Shoppers compare price, brand and quality.' : 'Business buyers mostly compare price, and will import if everyone is too expensive.'} Pricing above the market costs you share; below it wins share but earns less per sale.</p>
     </BottomSheet>
   );
+}
+
+function LabourNote({ w, c }: { w: WorldState; c: Company }) {
+  const l = w.macro.labour?.[c.industry];
+  if (!l) return <span className="text-muted">Normal</span>;
+  const d = l.mult - 1;
+  return <span className={cx(d > 0.03 ? 'text-amber' : d < -0.03 ? 'text-green' : 'text-muted')}>{Math.abs(d) < 0.03 ? 'Normal' : d > 0 ? `Workers scarce: pay +${Math.round(d * 100)}%` : `Plenty of workers: pay ${Math.round(d * 100)}%`}</span>;
 }

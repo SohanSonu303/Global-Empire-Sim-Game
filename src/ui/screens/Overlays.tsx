@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useGame } from '../../store/game';
+import { GOODS } from '../../engine/data';
+import { loadSettings } from '../../persistence/saves';
 import { Portrait } from '../art/art';
 import { BottomSheet, Button } from '../components/core';
 import { IconBolt } from '../components/Icons';
@@ -80,4 +82,24 @@ export function EventSheet() {
       <p className="text-xs text-dim mt-3">The game stays paused. If you don't decide by day {ev.expiresDay}, the last option is taken.</p>
     </BottomSheet>
   );
+}
+
+/** A new tender for something you make pauses the game, so it is never missed at 5x. */
+export function TenderWatch() {
+  const tenders = useGame((s) => s.world?.play.tenders);
+  const seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const w = useGame.getState().world;
+    if (!tenders || !w) return;
+    const yours = tenders.filter((t) => t.status === 'open' && w.companies.some((c) => c.isPlayer && !c.bankrupt && c.good === t.good));
+    if (!seen.current) { seen.current = new Set(yours.map((t) => t.id)); return; } // already open when the game loaded
+    const fresh = yours.filter((t) => !seen.current!.has(t.id));
+    for (const t of fresh) seen.current.add(t.id);
+    if (!fresh.length) return;
+    const g = useGame.getState();
+    const t = fresh[0];
+    if (loadSettings().pauseTenders !== false && g.speed !== 0) g.setSpeed(0);
+    g.notify(`New tender: ${t.buyer} wants ${GOODS[t.good].name.toLowerCase()}. See your assistant.`);
+  }, [tenders]);
+  return null;
 }

@@ -1,7 +1,8 @@
 import { normal } from './rng';
 import { clamp } from './company';
 import { GOODS, GOOD_IDS } from './data';
-import type { Macro, WorldState } from './types';
+import { INDUSTRY_IDS } from './data';
+import type { IndustryId, Macro, WorldState } from './types';
 
 /** Base-year GDP components (annual, game currency). */
 const BASE = { c: 1_400e9, i: 420e9, g: 480e9, x: 380e9, m: 330e9 };
@@ -63,7 +64,8 @@ export function monthlyMacro(w: WorldState): { prevRate: number; prevInflation: 
   const c = BASE.c * m.realConsumption * pl;
   const i = BASE.i * m.realConsumption * clamp(1 - 3 * (m.rate - 0.035), 0.5, 1.4) * (0.8 + 0.35 * m.confidence) + m.capexMonth * 12;
   const g = BASE.g * pl * Math.pow(1.02, years);
-  const x = BASE.x * pl * (1 + 0.45 * (m.oilPrice - 1)) * Math.pow(1.02, years);
+  // Exports follow how the world gets on with Astoria, its wars and exchange rates (see trade.ts)
+  const x = BASE.x * pl * (1 + 0.45 * (m.oilPrice - 1)) * Math.pow(1.02, years) * (w.play?.trade?.exportMood ?? 1);
   const mm = BASE.m * m.realConsumption * pl * (1 + 0.25 * (m.oilPrice - 1));
   const gdp = c + i + g + x - mm;
 
@@ -81,25 +83,38 @@ export function monthlyMacro(w: WorldState): { prevRate: number; prevInflation: 
       { label: 'Imports M', value: mm, op: '-' },
       { label: 'GDP', value: gdp, op: '=' },
     ],
-    note: 'Higher rates reduce consumption and investment; oil prices lift exports and import costs.',
+    note: 'Higher rates reduce consumption and investment; oil prices lift exports and import costs. Exports also rise when trading partners are friendly and at peace, and fall when they fight or their money weakens.',
   };
   m.capexMonth = 0;
 
-  // Inflation: inertia + demand pressure + wages + energy
+  // Inflation: inertia + demand pressure + wages + energy + goods getting dearer.
+  // Only a rise in goods prices adds to inflation; goods that simply stay dear do not keep adding.
   const gap = m.growth - m.trendGrowth;
+  const gp = goodsPressure(w);
+  const gpSlow = m.goodsSlow ?? gp;
+  const goodsRise = gp - gpSlow;
+  m.goodsSlow = gpSlow + (gp - gpSlow) / 12;
   const pi =
     0.8 * m.inflation +
     0.2 * m.inflationTarget +
     0.18 * gap +
     0.15 * (m.wageGrowth - 0.03) +
-    0.02 * (m.oilPrice - 1) +
-    0.03 * goodsPressure(w) +
+    0.012 * (m.oilPrice - 1) + // oil also reaches inflation through goods prices below
+    0.06 * goodsRise +
     0.0015 * normal(w.rng);
   m.inflation = clamp(pi, -0.03, 0.3);
 
-  // Okun's law with drift back to natural rate
-  const du = (-0.5 * gap) / 12 + 0.03 * (m.naturalUnemployment - m.unemployment) + 0.0008 * normal(w.rng);
+  // Okun's law with drift back to natural rate, plus real hiring and layoffs by companies
+  const workers = w.companies.reduce((s, co) => s + (co.bankrupt ? 0 : co.workers), 0);
+  const avgW = m.workersAvg ?? workers;
+  const hiring = avgW > 0 ? workers / avgW - 1 : 0;
+  m.workersAvg = workers;
+  // Only hiring faster or slower than usual moves unemployment: steady growth is met by a growing workforce
+  const usual = m.hiringAvg ?? hiring;
+  m.hiringAvg = usual * 0.9 + hiring * 0.1;
+  const du = (-0.5 * gap) / 12 + 0.03 * (m.naturalUnemployment - m.unemployment) - 0.25 * clamp(hiring - usual, -0.1, 0.1) + 0.0008 * normal(w.rng);
   m.unemployment = clamp(m.unemployment + du, 0.02, 0.25);
+  updateLabour(w);
   m.wageGrowth = clamp(0.02 + 0.6 * m.inflation - 0.8 * (m.unemployment - m.naturalUnemployment), -0.03, 0.15);
 
   // Confidence
@@ -149,4 +164,28 @@ export function indexReturn(w: WorldState, days: number): number {
 export function goodsPressure(w: WorldState): number {
   const ids = GOOD_IDS.filter((g) => GOODS[g].tier === 'product');
   return ids.reduce((s, g) => s + (w.goods[g].idx - 1), 0) / ids.length;
+}
+
+/** Skilled industries feel a shortage of workers more */
+const SKILL: Record<IndustryId, number> = { tech: 1.2, health: 1.1, finance: 0.9, energy: 0.8, manufacturing: 0.7, resources: 0.6, retail: 0.4, services: 0.5 };
+/** Workers available grow about this much a year in every industry */
+const LABOUR_GROWTH = 0.012;
+
+/**
+ * Labour market per industry: when an industry hires faster than its pool of trained people grows,
+ * its wages rise (engineers get scarce); when it lays people off, wages there ease. Low national
+ * unemployment tightens every industry a little.
+ */
+export function updateLabour(w: WorldState): void {
+  const m = w.macro;
+  const lab = (m.labour ??= {});
+  const years = w.day / 365;
+  for (const ind of INDUSTRY_IDS) {
+    const staff = w.companies.reduce((s, c) => s + (!c.bankrupt && c.industry === ind ? c.workers : 0), 0);
+    const cur = (lab[ind] ??= { mult: 1, tight: 1, base: Math.max(1, staff) / Math.pow(1 + LABOUR_GROWTH, years) });
+    const pool = cur.base * Math.pow(1 + LABOUR_GROWTH, years);
+    cur.tight = staff / Math.max(1, pool);
+    const target = clamp(1 + SKILL[ind] * 1.6 * (cur.tight - 1) - 1.2 * (m.unemployment - m.naturalUnemployment), 0.85, 1.5);
+    cur.mult += (target - cur.mult) * 0.12;
+  }
 }

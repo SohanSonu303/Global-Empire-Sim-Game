@@ -11,6 +11,8 @@ import { deplete, extractionMult, isRawMine, RAW_UPKEEP, reserveCapMult } from '
 import { premiumPerDay } from './disasters';
 import { GOODS, GOOD_IDS, IMPORT_PREMIUM, fixedAt } from './data';
 import { boostMult, clamp, damageMult, drawCredit, emptyDay, finishDay, importPrice, maintCostPerDay, managerCostPerDay, productivity, reachOf, refPrice, salaryOf, sellPrice, wageIndex, worldIdx } from './company';
+import { execSkill } from './execs';
+import { labWages } from './research';
 import type { Company, Contract, DayResult, GoodId, GoodMarket, WorldState } from './types';
 import { campaignMult, bookDelivery, jobPace, switchMult } from './strategy';
 import { TRAIT_RATES, hasTrait, noteRawSaved } from './traits';
@@ -104,12 +106,13 @@ export function operateEconomy(w: WorldState): void {
 
     let matCost = 0;
     for (const i of def.inputs) {
-      const st = c.inputs[i.good]!;
+      const st = (c.inputs[i.good] ??= { qty: 0, cost: 0 }); // older saves may lack an input added later
       const use = produced * i.qty;
       matCost += use * st.cost;
       st.qty = Math.max(0, st.qty - use);
     }
-    const vcSpend = produced * def.vc * pl * extractionMult(c) * boostMult(c, 'cost');
+    matCost *= c.labFx?.cost ?? 1; // R&D and patents make each unit cheaper
+    const vcSpend = produced * def.vc * pl * extractionMult(c) * boostMult(c, 'cost') * (c.labFx?.cost ?? 1);
     deplete(c, produced);
     if (produced > 0) {
       const total = c.inventory + produced;
@@ -347,7 +350,8 @@ export function operateEconomy(w: WorldState): void {
     } else {
       const baseIn = def.inputs.reduce((s, i) => s + i.qty * GOODS[i.good].p0, 0);
       const nowIn = def.inputs.reduce((s, i) => s + i.qty * GOODS[i.good].p0 * w.goods[i.good].idx, 0);
-      const rest = def.p0 - baseIn;
+      // Labour and the rest: dearer workers in this industry push its prices up (about half passes through)
+      const rest = (def.p0 - baseIn) * Math.sqrt(w.macro.labour?.[def.industry]?.mult ?? 1);
       costIdx = (nowIn + rest) / def.p0;
     }
     // Regulated prices are set by the government from costs: shortages and gluts don't move them
@@ -381,10 +385,10 @@ export function operateEconomy(w: WorldState): void {
     r.cogs = sold * c.invCost;
     c.inventory = Math.max(0, p.avail) * 0.997;
     r.grossProfit = r.revenue - r.cogs;
-    r.wages = c.workers * salaryOf(c) * c.salaryMult * wageIndex(w);
+    r.wages = c.workers * salaryOf(c) * c.salaryMult * wageIndex(w, c.industry);
     r.fixed = fixedAt(c.good, c.level) * pl * (c.fixedScale ?? 1) * (isRawMine(c) ? RAW_UPKEEP : 1) + premiumPerDay(c) + maintCostPerDay(w, c) + managerCostPerDay(w, c);
     r.marketing = r.revenue * c.marketingPct;
-    r.rd = r.revenue * c.rdPct;
+    r.rd = r.revenue * c.rdPct + labWages(c);
     r.opex = r.wages + r.fixed + r.marketing + r.rd;
     if (isBank(c)) {
       r.interestIncome = bankIncome.get(c.id) ?? 0;
@@ -397,7 +401,8 @@ export function operateEconomy(w: WorldState): void {
     r.operatingProfit = r.grossProfit - r.opex + r.interestIncome - r.fundingCost - r.loanLosses;
     r.interest = owed.get(c.id) ?? 0;
     const pretax = r.operatingProfit - r.interest;
-    r.tax = Math.max(0, pretax) * m.taxRate;
+    // A CFO's tax planning saves up to about 6%
+    r.tax = Math.max(0, pretax) * m.taxRate * (c.isPlayer ? 1 - 0.06 * Math.min(1.4, execSkill(w, 'cfo')) : 1);
     r.netIncome = pretax - r.tax;
     // Purchases were already paid; production's other variable cost is paid now.
     // Business customers of your companies pay on account: the money arrives over about a month.
@@ -405,7 +410,7 @@ export function operateEconomy(w: WorldState): void {
     let collected = 0;
     if (c.isPlayer && (onAccount > 0 || c.receivables)) {
       c.receivables = (c.receivables ?? 0) + onAccount;
-      collected = c.receivables / RECEIVABLE_DAYS;
+      collected = c.receivables / (RECEIVABLE_DAYS / (1 + 0.4 * Math.min(1.4, execSkill(w, 'cfo')))); // a CFO chases invoices
       c.receivables -= collected;
     }
     c.cash += r.revenue - onAccount + collected - p.vcSpend - r.opex + r.interestIncome - r.fundingCost - r.loanLosses - r.interest - r.tax;

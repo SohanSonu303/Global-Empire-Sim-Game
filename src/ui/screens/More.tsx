@@ -17,6 +17,7 @@ import {
 } from '../components/Icons';
 import { loadSettings, saveSettings } from '../../persistence/saves';
 import { play } from '../sound';
+import { appVersion, checkForUpdate } from '../../state/pwaUpdate';
 import { ReportBody } from './Rewards';
 
 export function MoreScreen() {
@@ -28,6 +29,8 @@ export function MoreScreen() {
     { r: { screen: 'stats' }, label: 'Statistics', sub: 'GDP, inflation, rates, your net worth', icon: <IconStats /> },
     { r: { screen: 'government' }, label: 'Government', sub: 'Central bank now; politics in Phase 2', icon: <IconBank /> },
     { r: { screen: 'strategy' }, label: 'Deals & Strategies', sub: 'Contracts, auctions, tenders, warehouses, price wars, tips', icon: <IconTarget /> },
+    { r: { screen: 'execs' }, label: 'Executives', sub: 'Hire a CFO, a head of sales and an operations chief', icon: <IconPerson /> },
+    { r: { screen: 'budget' }, label: 'Budget & forecast', sub: 'Your next 12 months, what-ifs and your plan', icon: <IconStats /> },
     { r: { screen: 'reports' }, label: 'Monthly reports', sub: 'Your report cards and grades', icon: <IconStats /> },
     { r: { screen: 'achievements' }, label: 'Achievements', sub: 'Your milestones', icon: <IconTrophy /> },
     { r: { screen: 'saves' }, label: 'Saves', sub: 'Save, load, export and import', icon: <IconSave /> },
@@ -52,6 +55,8 @@ export function MoreScreen() {
       </Card>
       <TraitsCard />
       <SoundToggle />
+      <TenderPauseToggle />
+      <UpdateCheck />
     </Screen>
   );
 }
@@ -458,5 +463,56 @@ export function SavesScreen() {
         <Button variant="dark" block onClick={() => { if (confirm('Start a new game? Your current game stays in Saves.')) { useGame.getState().setSpeed(0); void saveNow(); useGame.setState({ world: null, saveId: null, stack: [] }); } }}>Back to title screen</Button>
       </Screen>
     </div>
+  );
+}
+
+function UpdateCheck() {
+  const [checking, setChecking] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  return (
+    <Card className="mt-3 p-3">
+      <div className="flex items-center gap-3">
+        <span className="flex-1 min-w-0">
+          <span className="block font-semibold">Version</span>
+          <span className="block text-xs text-muted">{appVersion}</span>
+        </span>
+        <Button
+          variant="dark"
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true);
+            const found = await checkForUpdate();
+            setChecking(false);
+            setNote(found ? 'A new version is here. It loads once the game is paused.' : "You're on the latest version.");
+          }}
+        >
+          {checking ? 'Checking…' : 'Check for updates'}
+        </Button>
+      </div>
+      {note && <p className="text-xs text-dim mt-2">{note}</p>}
+    </Card>
+  );
+}
+
+function TenderPauseToggle() {
+  const [on, setOn] = useState(() => loadSettings().pauseTenders !== false);
+  return (
+    <Card className="mt-3">
+      <button
+        className="flex w-full items-center gap-3 px-3 min-h-[60px] text-left"
+        role="switch"
+        aria-checked={on}
+        onClick={() => { const v = !on; setOn(v); saveSettings({ ...loadSettings(), pauseTenders: v }); }}
+      >
+        <span className="grid place-items-center size-10 rounded-lg bg-card-2 text-xl">🏛️</span>
+        <span className="flex-1 min-w-0">
+          <span className="block font-semibold">Pause for new tenders</span>
+          <span className="block text-xs text-muted">Stops the clock when a tender opens for a product you make</span>
+        </span>
+        <span className={cx('w-11 h-6 rounded-full p-0.5 transition-colors', on ? 'bg-green' : 'bg-line-strong')}>
+          <span className={cx('block size-5 rounded-full bg-white transition-transform', on && 'translate-x-5')} />
+        </span>
+      </button>
+    </Card>
   );
 }

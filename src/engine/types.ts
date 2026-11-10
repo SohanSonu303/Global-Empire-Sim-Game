@@ -170,6 +170,107 @@ export interface DayResult {
 }
 
 export type MaintLevel = 'low' | 'normal' | 'high';
+/** A material that just got much dearer */
+export interface Shock { good: GoodId; day: number; rise: number }
+export type ExecRole = 'cfo' | 'sales' | 'ops' | 'rd';
+export type ResearchKind = 'process' | 'quality' | 'premium';
+export interface Researcher { id: string; name: string; /** 0.5..1.5 */ skill: number; field: IndustryId; /** per day */ salary: number; hired: number }
+export interface Project { kind: ResearchKind; started: number; points: number; need: number; /** milestones reached, 0..3 */ stage: number; /** a rival patented this idea first */ scooped?: boolean }
+export interface Lab {
+  staff: Researcher[];
+  project?: Project;
+  /** Lasting gains from milestones: cost cut share, quality, price headroom */
+  gains: { cost: number; quality: number; price: number };
+  /** Finished projects without a breakthrough, per kind (each makes the next try likelier) */
+  tries: Partial<Record<ResearchKind, number>>;
+}
+/** A company's R&D effects today: unit cost multiplier, quality bonus, extra price customers accept */
+export interface LabFx { cost: number; quality: number; price: number }
+export interface Patent {
+  id: string;
+  holderId: string;
+  ownerId: string;
+  isPlayer: boolean;
+  good: GoodId;
+  kind: ResearchKind;
+  effect: number;
+  name: string;
+  granted: number;
+  expires: number;
+  licences: { companyId: string; fee: number; since: number }[];
+  /** Licence fees collected */
+  earned: number;
+}
+/** Goods at sea: an export to sell, an import coming home, or a barter swap (out and back) */
+export interface Shipment {
+  id: string;
+  kind: 'export' | 'import' | 'barter';
+  /** The foreign country */
+  to: string;
+  /** What goes out (exports and barter) */
+  good: GoodId;
+  qty: number;
+  /** What the outgoing stock cost you */
+  cost: number;
+  shipping: number;
+  left: number;
+  arrives: number;
+  /** What comes home (imports and barter) */
+  back?: GoodId;
+  backQty?: number;
+  backCost?: number;
+}
+export interface BarterOffer { id: string; nation: string; want: GoodId; wantQty: number; give: GoodId; giveQty: number; until: number }
+export interface NationState {
+  /** Dollars per unit of its currency */
+  fx: number;
+  fxHist: number[];
+  /** Slow random drift in its prices */
+  noise: Partial<Record<GoodId, number>>;
+  /** How full its market is of a good after recent sales (negative = scarcer after you bought) */
+  glut: Partial<Record<GoodId, number>>;
+  /** Its economy: yearly growth, central bank rate and where it is in the cycle */
+  growth?: number;
+  rate?: number;
+  phase?: 'boom' | 'growing' | 'slowing' | 'recession';
+  phaseNews?: number;
+  /** A free-trade deal with Astoria, or Astoria's sanctions on it */
+  deal?: { kind: 'fta' | 'sanction'; since: number; until: number };
+  /** Day your trade office there opened */
+  office?: number;
+}
+export interface TradeState {
+  /** Its own random stream, so trade never shifts the rest of the world */
+  rng: RngState;
+  /** Relations between each pair of countries, -1..1, keyed "a|b" in name order */
+  rel: Record<string, number>;
+  wars: string[];
+  nations: Record<string, NationState>;
+  shipments: Shipment[];
+  offers: BarterOffer[];
+  log: { day: number; text: string; tone: 'good' | 'bad' | 'neutral' }[];
+  /** Profit from exports so far */
+  earned?: number;
+  /** World price of each good against normal (wars, gluts and shortages abroad), and what is normal */
+  world?: Partial<Record<GoodId, number>>;
+  worldBase?: Partial<Record<GoodId, number>>;
+  /** Foreign demand for Astoria's exports, 1 = normal */
+  exportMood?: number;
+}
+export type ExecTrait = 'steady' | 'ambitious' | 'frugal' | 'star';
+export interface Executive {
+  id: string;
+  role: ExecRole;
+  name: string;
+  /** About 0.5 (green) to 1.5 (top of the field) */
+  skill: number;
+  trait: ExecTrait;
+  /** Per day */
+  salary: number;
+  hired: number;
+  morale: number;
+  lastRaise: number;
+}
 export type ManagerId = 'none' | 'basic' | 'pro';
 
 /** A temporary multiplier: attract (how many buyers pick you), price, productivity or variable cost. */
@@ -295,6 +396,15 @@ export interface Company {
   receivables?: number;
   /** Who runs the company day to day (player companies; none = you do) */
   manager?: ManagerId;
+  /** Day of the last small capacity expansion (rivals) */
+  lastExpand?: number;
+  /** Research lab, and today's effects from R&D and patents */
+  lab?: Lab;
+  labFx?: LabFx;
+  /** Your operations chief's strength, copied onto each of your companies daily */
+  execOps?: number;
+  /** The hired manager's last weekly round: what it changed */
+  mgrLog?: { day: number; did: string[] };
   /** Temporary effects from rival moves, deals and decisions */
   boosts?: Boost[];
   /** Slow average of market share: rivals compare today's share against it */
@@ -392,6 +502,14 @@ export interface Macro {
   taxRate: number;
   govDebt: number;
   realOutputPrev: number;
+  /** Smoothed company headcount, to turn hiring and layoffs into unemployment */
+  workersAvg?: number;
+  /** Labour market per industry: wage multiplier and how scarce workers are (1 = normal) */
+  labour?: Partial<Record<IndustryId, { mult: number; tight: number; base: number }>>;
+  /** Usual monthly change in headcount */
+  hiringAvg?: number;
+  /** Goods price pressure, smoothed over about a year */
+  goodsSlow?: number;
   capexMonth: number;
   govRevenue: number;
   govSpending: number;
@@ -433,6 +551,8 @@ export interface Rival {
   lastMoveDay?: number;
   /** Day the tycoon last offered to buy into one of your companies */
   lastOfferDay?: number;
+  /** Day the rival last tried to take over a company */
+  lastMergerDay?: number;
 }
 
 export type NewsCategory =
@@ -577,6 +697,33 @@ export interface Job {
   status: 'offer' | 'active' | 'done' | 'failed';
   offerUntil: number;
   early?: boolean;
+  /** Long tenders: day deliveries were last checked */
+  checked?: number;
+  /** Share of the pay received up front (deliveries pay the rest) */
+  advance?: number;
+}
+
+/** A company's answer to a request you posted */
+export interface RequestReply { companyId: string; name: string; price: number; qtyPerDay: number; quality: number }
+
+/** A request you posted: buy an input, or sell your output, to whoever offers the best terms */
+export interface SupplyRequest {
+  id: string;
+  side: 'buy' | 'sell';
+  companyId: string;
+  good: GoodId;
+  qtyPerDay: number;
+  days: number;
+  /** Most you pay (buying) or least you take (selling), per unit */
+  price: number;
+  posted: number;
+  replyDay: number;
+  closes: number;
+  answered?: boolean;
+  replies: RequestReply[];
+  /** Units a day already signed */
+  filled: number;
+  status: 'open' | 'done' | 'closed';
 }
 
 export interface Tender {
@@ -587,8 +734,15 @@ export interface Tender {
   months: number;
   closes: number;
   ref: number;
-  bids: { companyId: string; name: string; price: number; quality: number }[];
-  mine?: { companyId: string; price: number };
+  /** A big company buying (otherwise a government office) */
+  buyerId?: string;
+  /** Day the tender opened */
+  opened?: number;
+  bids: { companyId: string; name: string; price: number; quality: number; capacity?: number; out?: boolean }[];
+  /** Your current bid in the tender room */
+  mine?: { companyId: string; name: string; price: number; score: number };
+  /** The bidding war, once you step in */
+  room?: { companyId: string; round: number; log: string[] };
   status: 'open' | 'won' | 'lost' | 'closed';
   winner?: string;
   winPrice?: number;
@@ -638,6 +792,28 @@ export interface PriceWar {
   status: 'active' | 'won' | 'lost' | 'truce';
   end?: number;
   cost: number;
+}
+
+/** A newspaper stock tip: a story that may or may not come true */
+export interface StockCall {
+  id: string;
+  ticker: string;
+  companyId: string;
+  dir: 1 | -1;
+  day: number;
+  /** When the story breaks */
+  due: number;
+  story: string;
+  /** Real numbers that point the same way */
+  reasons: string[];
+  /** Whether the story comes true (hidden from the player) */
+  truth: boolean;
+  /** Share price when the tip was printed, and when it was judged */
+  start: number;
+  end?: number;
+  broke?: boolean;
+  judged?: boolean;
+  hit?: boolean;
 }
 
 export interface Tip {
@@ -716,6 +892,34 @@ export interface Play {
   cardLast?: Record<string, number>;
   /** Business cycle state */
   cycle?: Cycle;
+  /** Founding-partner talks: partner id -> when talks began, how many pitches, the last counter-offer */
+  pitches?: Record<string, { day: number; count: number; good: GoodId; offer?: number }>;
+  /** Terms a partner agreed to for a company you are about to found */
+  partnerDeal?: { good: GoodId; partnerId: string; pct: number; day: number };
+  /** Your saved 12-month plan: profit per month, and what you really made */
+  budget?: { start: number; plan: number[]; actual: number[]; acc: number };
+  /** Recent supply chain shocks */
+  shocks?: Shock[];
+  /** The newspaper's stock tips, its scorecard, and its own random stream */
+  calls?: StockCall[];
+  callScore?: { right: number; total: number };
+  pressRng?: RngState;
+  /** Patents held by anyone, lab job seekers, licence talks */
+  patents?: Patent[];
+  labPool?: { day: number; list: Researcher[] };
+  licenceTalks?: Record<string, number>;
+  labRng?: RngState;
+  /** Countries, ships at sea and barter offers */
+  trade?: TradeState;
+  /** Your executives, and this month's candidates */
+  execs?: Executive[];
+  candidates?: { day: number; list: Executive[] };
+  /** Requests you posted for companies to answer */
+  requests?: SupplyRequest[];
+  /** Contracts and tenders delivered in full, and missed */
+  track?: { done: number; failed: number };
+  /** Assistant tips the player cleared: tip id -> day they may show again */
+  cleared?: Record<string, number>;
 }
 
 export interface WorldState {
@@ -795,12 +999,35 @@ export type Command =
   | { type: 'sellToRivals'; id: string; good: GoodId; qty: number }
   | { type: 'downsize'; companyId: string }
   | { type: 'swapTrait'; from: TraitId; to: TraitId }
-  | { type: 'bidTender'; tenderId: string; companyId: string; price: number }
+  | { type: 'tenderJoin'; tenderId: string; companyId: string }
+  | { type: 'tenderBid'; tenderId: string; price: number }
+  | { type: 'tenderPass'; tenderId: string }
   | { type: 'endWar'; warId: string }
   | { type: 'setInsurance'; companyId: string; on: boolean }
   | { type: 'explore'; companyId: string }
   | { type: 'bidAuction'; auctionId: string; amount: number }
   | { type: 'answerInbox'; cardId: string; choiceId: string }
+  | { type: 'clearTips'; ids: string[] }
+  | { type: 'postRequest'; side: 'buy' | 'sell'; companyId: string; good: GoodId; qtyPerDay: number; days: number; price: number }
+  | { type: 'acceptReply'; requestId: string; companyId: string }
+  | { type: 'cancelRequest'; requestId: string }
+  | { type: 'saveBudget' }
+  | { type: 'hireExec'; id: string }
+  | { type: 'fireExec'; id: string }
+  | { type: 'raiseExec'; id: string }
+  | { type: 'exportGoods'; to: string; good: GoodId; qty: number }
+  | { type: 'importGoods'; from: string; good: GoodId; qty: number }
+  | { type: 'acceptBarter'; id: string }
+  | { type: 'openOffice'; nation: string }
+  | { type: 'closeOffice'; nation: string }
+  | { type: 'hireResearcher'; id: string; companyId: string }
+  | { type: 'fireResearcher'; companyId: string; id: string }
+  | { type: 'startProject'; companyId: string; kind: ResearchKind }
+  | { type: 'stopProject'; companyId: string }
+  | { type: 'offerLicence'; patentId: string; companyId: string; fee: number }
+  | { type: 'acceptLicence'; patentId: string; companyId: string }
+  | { type: 'clearBudget' }
+  | { type: 'pitchPartner'; good: GoodId; partnerId: string; pct: number }
   | { type: 'setMaintenance'; companyId: string; level: MaintLevel }
   | { type: 'setManager'; companyId: string; manager: ManagerId };
 

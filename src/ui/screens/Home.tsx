@@ -9,6 +9,7 @@ import { CityScene } from '../art/art';
 import { Badge, Button, Card, Progress, Ribbon, Screen, SectionTitle, cx } from '../components/core';
 import { Num } from '../components/game';
 import { IconNews, IconTarget } from '../components/Icons';
+import { PaperTeaser } from './MarketWatch';
 import { playerCompanies } from '../helpers';
 import { runAction, useAdvice } from '../advice';
 import { openCards } from '../../engine/inbox';
@@ -66,6 +67,7 @@ export function HomeScreen() {
           <span className="inline-flex items-center gap-1.5"><IconNews size={16} /> The Astoria Times</span>
         </SectionTitle>
         <Card>
+          <PaperTeaser />
           <div className="divide-y divide-line">
             {w.news.slice(0, 4).map((n) => (
               <button key={n.id} onClick={() => push({ screen: 'article', id: n.id })} className="w-full text-left px-3 py-2.5 min-h-tap flex items-center gap-2">
@@ -96,7 +98,9 @@ const TONE: Record<Advice['severity'], { dot: string; ring: string; label: strin
 /** The PA: a short, prioritised to-do list with one-tap fixes. */
 function Assistant() {
   const advice = useAdvice();
+  const dispatch = useGame((s) => s.dispatch);
   const [all, setAll] = useState(false);
+  const clearable = advice.filter((a) => a.id !== 'event');
   const urgent = advice.filter((a) => a.severity === 'urgent' || a.severity === 'warn').length;
   const shown = all ? advice : advice.slice(0, 3);
   return (
@@ -104,7 +108,12 @@ function Assistant() {
       <div className="flex items-center gap-3 px-3 pt-3">
         <span className="grid place-items-center size-10 shrink-0 rounded-full bg-gradient-to-b from-gold to-gold-edge text-gold-ink font-black">PA</span>
         <div className="flex-1 min-w-0">
-          <div className="font-bold">Your assistant</div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold">Your assistant</span>
+            {clearable.length > 1 && (
+              <button className="text-xs font-semibold text-gold min-h-8 px-1" onClick={() => void dispatch({ type: 'clearTips', ids: clearable.map((a) => a.id) })}>Clear all</button>
+            )}
+          </div>
           <div className="text-xs text-muted">
             {advice.length === 0 ? 'Everything is running smoothly.' : urgent > 0 ? `${urgent} thing${urgent > 1 ? 's' : ''} need${urgent > 1 ? '' : 's'} your attention` : 'Nothing urgent. Some ideas to grow:'}
           </div>
@@ -149,6 +158,7 @@ function InboxCard() {
 
 function AdviceRow({ a }: { a: Advice }) {
   const t = TONE[a.severity];
+  const dispatch = useGame((s) => s.dispatch);
   return (
     <div className="flex items-start gap-2.5 px-3 py-2.5">
       <span className={cx('mt-1.5 size-2.5 shrink-0 rounded-full', t.dot)} aria-label={t.label} />
@@ -160,6 +170,14 @@ function AdviceRow({ a }: { a: Advice }) {
         <Button size="sm" variant={a.severity === 'urgent' ? 'gold' : 'dark'} className="shrink-0 max-w-[42%] whitespace-normal leading-tight" onClick={() => runAction(a.action!)}>
           {a.action.label}
         </Button>
+      )}
+      {a.id !== 'event' && (
+        <button
+          aria-label={`Clear: ${a.title}`}
+          title="Clear for two weeks"
+          className="shrink-0 grid place-items-center size-8 -mr-1 rounded-full text-dim hover:text-text hover:bg-card-2"
+          onClick={() => void dispatch({ type: 'clearTips', ids: [a.id] })}
+        >✕</button>
       )}
     </div>
   );

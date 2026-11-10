@@ -11,13 +11,14 @@ import type { Banner, MonthReport, Play, RecordId, Rival, WorldState } from './t
 
 export type UnlockKey =
   | 'contracts' | 'campaigns' | 'warehouse' | 'tenders' | 'freeze' | 'licence10' | 'wars' | 'marketBuy'
-  | 'ventures' | 'tips' | 'squeeze' | 'licence20' | 'lookGold' | 'lookHeli' | 'lookNeon';
+  | 'ventures' | 'tips' | 'squeeze' | 'licence20' | 'lookGold' | 'lookHeli' | 'lookNeon' | 'world';
 
 export const UNLOCKS: { level: number; key: UnlockKey; title: string; body: string; icon: string }[] = [
   { level: 2, key: 'contracts', icon: '📋', title: 'Contracts board', body: 'Rivals and the government post delivery jobs: a guaranteed buyer, usually near the market price.' },
   { level: 3, key: 'campaigns', icon: '📣', title: 'Brand campaigns', body: 'Run your own ad campaigns to lift sales for a few weeks.' },
   { level: 3, key: 'warehouse', icon: '🏬', title: 'Warehouses', body: 'Store extra output and sell it later when prices are higher.' },
   { level: 4, key: 'tenders', icon: '🏛️', title: 'Government tenders', body: 'Bid against rivals for big public orders.' },
+  { level: 5, key: 'world', icon: '🌍', title: 'World trade', body: 'The World map opens: 8 countries with their own needs, money and politics. Ship goods abroad, buy cheap, swap.' },
   { level: 5, key: 'freeze', icon: '🧊', title: 'Streak freeze', body: 'Miss one day a week without losing your streak.' },
   { level: 5, key: 'licence10', icon: '📜', title: 'Licences 10% cheaper', body: 'The government trusts you more.' },
   { level: 6, key: 'wars', icon: '⚔️', title: 'Price wars', body: 'Undercut a rival hard enough and you can push them out of a market.' },

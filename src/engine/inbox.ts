@@ -23,7 +23,7 @@ export const size = (w: WorldState, c: Company) => Math.max(5_000 * pl(w), c.sum
 const round = (v: number) => (v > 100_000 ? Math.round(v / 1000) * 1000 : Math.round(v / 100) * 100);
 const util = (c: Company) => c.sum30.sold / Math.max(1, c.sum30.capacity * 30);
 const margin = (c: Company) => (c.sum30.revenue > 0 ? c.sum30.netIncome / c.sum30.revenue : 0);
-const staffCost = (w: WorldState, c: Company, days: number) => round(c.workers * salaryOf(c) * c.salaryMult * wageIndex(w) * days);
+const staffCost = (w: WorldState, c: Company, days: number) => round(c.workers * salaryOf(c) * c.salaryMult * wageIndex(w, c.industry) * days);
 
 export function inbox(w: WorldState): InboxCard[] {
   return (w.play.inbox ??= []);

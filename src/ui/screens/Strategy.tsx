@@ -4,7 +4,7 @@ import { GOODS, GOOD_IDS } from '../../engine/data';
 import { refPrice } from '../../engine/company';
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import { unlockLevel, unlocked, type UnlockKey } from '../../engine/rewards';
-import { JOB_CAP_SHARE, MAX_JOBS, activeJobs, bookedPerDay, jobRoom, maxJobs, tenderScore } from '../../engine/strategy';
+import { JOB_CAP_SHARE, MAX_JOBS, activeJobs, bookedPerDay, jobRoom, maxJobs, tenderLeader } from '../../engine/strategy';
 import { WORKING_SHARE, auctionCompany, minBid, plantValue, playerBlock, rivalValuation } from '../../engine/auctions';
 import {
   FRESH_MONTHS, MAX_WAREHOUSE_LEVEL, ageMult, openDeals, openJobs, sendRoom, buildCost, dailyCost, monthsStored, premiumPrice, rivalBuyers, roomFor, runningCost, spaceOf, spacePer, spoilMonth, storable, upgradeCostOf, usedSpace,
@@ -14,6 +14,7 @@ import { Badge, Button, Card, Chips, Progress, Screen, SectionTitle, cx } from '
 import { SubHeader } from './More';
 import { Row, Slider } from './Company';
 import { GoodThumb } from '../art/plants';
+import { RequestsCard } from './Requests';
 
 /** Tabs without a key are open from the start. */
 const TABS: { id: StrategyTab; label: string; key?: UnlockKey }[] = [
@@ -74,6 +75,7 @@ function Contracts({ w }: { w: WorldState }) {
   return (
     <>
       <Intro>Deliver a quantity by a deadline for a fixed price, usually close to the market price (rush jobs pay a little more). The draw is a guaranteed buyer: the price is locked even if the market falls. Finish early for a small bonus; miss it and you pay a penalty. A company runs 2 contracts at first and more as you upgrade it (up to {MAX_JOBS}), and contracts can book at most {fmtPct(JOB_CAP_SHARE, 0)} of its output.</Intro>
+      <RequestsCard w={w} />
       {active.length > 0 && <SectionTitle>Active</SectionTitle>}
       <div className="space-y-2">{active.map((j) => <JobCard key={j.id} w={w} j={j} />)}</div>
       <SectionTitle>Offers</SectionTitle>
@@ -153,7 +155,7 @@ function Tenders({ w }: { w: WorldState }) {
   const past = w.play.tenders.filter((t) => t.status !== 'open').slice(-5).reverse();
   return (
     <>
-      <Intro>The government buys big amounts over several months. Send a price per unit: the lowest price wins, but better quality counts too. Winning gives you a guaranteed buyer; a short delivery costs a penalty.</Intro>
+      <Intro>Governments and big companies buy huge amounts over 6 to 12 months. Start a tender to enter a bidding war: you and rival companies take turns to offer a lower price, and rivals drop out when they can't go lower. The lowest price wins, but the buyer also weighs quality and whether you can deliver it all. Deliveries are checked every month; a short month costs a fine.</Intro>
       <SectionTitle>Open tenders</SectionTitle>
       {open.length === 0 && <Card className="p-3 text-sm text-muted">No open tenders. More come when the economy slows down.</Card>}
       <div className="space-y-2">{open.map((t) => <TenderCard key={t.id} w={w} t={t} />)}</div>
@@ -171,32 +173,26 @@ function Tenders({ w }: { w: WorldState }) {
 }
 
 function TenderCard({ w, t }: { w: WorldState; t: Tender }) {
-  const dispatch = useGame((s) => s.dispatch);
+  const push = useGame((s) => s.push);
+  const setSpeed = useGame((s) => s.setSpeed);
   const def = GOODS[t.good];
   const cos = makers(w, t.good);
-  const co = cos[0];
-  const [mult, setMult] = useState(t.mine ? t.mine.price / t.ref : 0.95);
-  const price = t.ref * mult;
-  const cost = co?.last.unitMaterialCost ?? 0;
-  const myScore = co ? tenderScore(t, price, co.quality) : 9;
-  const rank = 1 + t.bids.filter((b) => tenderScore(t, b.price, b.quality) < myScore).length;
+  const best = tenderLeader(t);
+  const total = t.qtyPerMonth * t.months;
   return (
     <Card className="p-3">
       <div className="flex items-start gap-2">
         <div className="flex-1">
           <div className="font-bold">{t.buyer}</div>
           <div className="text-sm">{t.qtyPerMonth.toLocaleString()} {def.unit} of {def.name.toLowerCase()} a month for {t.months} months</div>
-          <div className="text-xs text-muted">Worth about {fmtMoney(t.qtyPerMonth * t.months * t.ref)} · closes in {days(w, t.closes)} days · {t.bids.length} rival bid{t.bids.length === 1 ? '' : 's'}</div>
+          <div className="text-xs text-muted">{total.toLocaleString()} {def.unit} in all · worth about {fmtMoney(total * t.ref)} · closes in {days(w, t.closes)} days · {t.bids.filter((b) => !b.out).length} rival{t.bids.length === 1 ? '' : 's'} bidding</div>
         </div>
-        {t.mine && <Badge tone="good">Bid sent</Badge>}
+        {t.room && (best?.player ? <Badge tone="good">Leading</Badge> : <Badge tone="warn">Outbid</Badge>)}
       </div>
-      {!co ? <div className="text-xs text-amber mt-2">You need a company that makes {def.name.toLowerCase()} to bid.</div> : (
-        <>
-          <Slider label="Your price (% of market)" value={Math.round(mult * 100)} min={60} max={130} step={1} suffix="%" onCommit={(v) => setMult(v / 100)} />
-          <Row label="Price per unit" value={`${fmtPrice(price)} (your cost ${fmtPrice(cost)})`} tone={price > cost ? 'good' : 'bad'} />
-          <Row label="Your chance" value={rank === 1 ? 'Leading (rival bids are sealed, but this would win today)' : `About #${rank} of ${t.bids.length + 1}`} tone={rank === 1 ? 'good' : undefined} />
-          <Button block size="sm" className="mt-1" onClick={() => dispatch({ type: 'bidTender', tenderId: t.id, companyId: co.id, price })}>{t.mine ? 'Change bid' : 'Send bid'}</Button>
-        </>
+      {!cos.length ? <div className="text-xs text-amber mt-2">You need a company that makes {def.name.toLowerCase()} to bid.</div> : (
+        <Button block size="sm" className="mt-2" onClick={() => { setSpeed(0); push({ screen: 'tender', id: t.id }); }}>
+          {t.room ? 'Back to the bidding' : 'Start tender'}
+        </Button>
       )}
     </Card>
   );
@@ -426,7 +422,7 @@ function SendStock({ w, wh, g, qty, own }: { w: WorldState; wh: Warehouse; g: Go
   );
 }
 
-function StockPanel({ w, wh, g }: { w: WorldState; wh: Warehouse; g: GoodId }) {
+export function StockPanel({ w, wh, g }: { w: WorldState; wh: Warehouse; g: GoodId }) {
   const dispatch = useGame((s) => s.dispatch);
   const st = wh.stock[g];
   const rule = wh.rules[g];

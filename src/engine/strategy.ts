@@ -3,13 +3,14 @@
  * the monopoly bonus (and antitrust probes), insider tips and joint ventures.
  */
 import { GOODS, GOOD_IDS, fixedAt, startCost } from './data';
-import { clamp, companyValue, refPrice } from './company';
+import { clamp, companyValue, refPrice, unitEconomics } from './company';
 import { remember } from './contracts';
 import { stockByTicker } from './market';
 import { addNews, fmtMoney, fmtPct, fmtPrice } from './news';
 import { chance, int, next, pick, range } from './rng';
 import { banner, unlocked } from './rewards';
 import { jobBonus } from './traits';
+import { execSkill } from './execs';
 import { newCompany, seedInputs } from './world';
 import type { CampaignSize, CommandResult, Company, GoodId, Job, PendingEvent, PriceWar, Rival, Tender, WorldState } from './types';
 
@@ -74,7 +75,7 @@ function makeJob(w: WorldState): Job | null {
   const qty = Math.max(10, Math.round((cap * days * range(r, 0.12, 0.35)) / 10) * 10);
   // A guaranteed buyer is the main draw: most pay about the market price, rush jobs a little more
   const rush = days === 30 ? 0.06 : days === 45 ? 0.03 : 0;
-  const pay = qty * refPrice(w, g) * (range(r, 0.97, 1.05) + rush);
+  const pay = qty * refPrice(w, g) * (range(r, 0.97, 1.05) + rush) * (1 + 0.04 * Math.min(1.4, execSkill(w, 'sales'))); // a head of sales negotiates
   return {
     id: `j${++w.seq}`, source: gov ? 'gov' : 'rival', buyerName: buyer ? buyer.name : pick(r, GOV_BUYERS[g] ?? ['Government of Astoria']),
     buyerId: buyer?.id, rivalId: buyer?.ownerId, good: g, qty, delivered: 0, pay, bonus: pay * 0.05, penalty: pay * 0.25,
@@ -108,14 +109,15 @@ export function jobPace(w: WorldState, j: Job): number {
 export function bookDelivery(w: WorldState, j: Job, qty: number): number {
   if (qty <= 0) return 0;
   const unit = j.pay / j.qty;
+  const due = unit * (1 - (j.advance ?? 0)); // the advance already paid part of each unit
   j.delivered += qty;
   const buyer = j.buyerId ? w.companies.find((c) => c.id === j.buyerId && !c.bankrupt) : undefined;
   if (buyer) {
-    buyer.cash -= qty * unit;
+    buyer.cash -= qty * due;
     const cur = buyer.inputs[j.good] ?? { qty: 0, cost: unit };
     buyer.inputs[j.good] = { qty: cur.qty + qty, cost: (cur.qty * cur.cost + qty * unit) / (cur.qty + qty) };
   }
-  return qty * unit;
+  return qty * due;
 }
 
 function dailyJobs(w: WorldState): void {
@@ -125,6 +127,8 @@ function dailyJobs(w: WorldState): void {
     const c = w.companies.find((x) => x.id === j.companyId);
     if (j.delivered >= j.qty - 1e-6) {
       j.status = 'done';
+      const tr = (w.play.track ??= { done: 0, failed: 0 });
+      tr.done += 1;
       j.early = w.day <= j.startDay + j.days * 0.75;
       const extra = (j.early ? j.bonus : 0) + jobBonus(w, j.pay);
       if (c) c.cash += extra;
@@ -135,8 +139,11 @@ function dailyJobs(w: WorldState): void {
       banner(w, j.early ? 'Contract done early!' : 'Contract done!', `${j.buyerName}: ${fmtMoney(j.pay + extra)}${j.early ? ` incl. ${fmtMoney(extra)} bonus` : ''}`, xp, 'good');
     } else if (w.day > j.deadline || !c || c.bankrupt) {
       j.status = 'failed';
+      const tr = (w.play.track ??= { done: 0, failed: 0 });
+      tr.failed += 1;
       const share = 1 - j.delivered / j.qty;
-      const fine = j.source === 'tender' ? j.pay * 0.25 * share : j.penalty * Math.max(0.25, share);
+      // a tender's advance on undelivered units goes back to the buyer
+      const fine = (j.source === 'tender' ? j.pay * 0.25 * share : j.penalty * Math.max(0.25, share)) + j.pay * (j.advance ?? 0) * share;
       if (c) c.cash -= fine;
       remember(w.rivals.find((r) => r.id === j.rivalId), w, -8, `${c?.name ?? 'You'} missed a delivery deadline.`);
       banner(w, 'Contract missed', `${j.buyerName}: penalty ${fmtMoney(fine)}`, 0, 'bad');
@@ -197,72 +204,228 @@ const GOV_BUYERS: Partial<Record<GoodId, string[]>> = {
   real_estate: ['Government Offices'],
 };
 
-export function tenderScore(t: Tender, price: number, quality: number): number {
-  return price / t.ref - 0.25 * (quality - 1);
+/** Tenders run this long and stay open this many days */
+export const TENDER_MONTHS: [number, number] = [6, 12];
+export const TENDER_OPEN_DAYS = 14;
+/** Rounds before the buyer closes the bidding */
+export const TENDER_ROUNDS = 10;
+/** Each 0.1 of quality is worth 2.5% of the price */
+const QUALITY_WEIGHT = 0.25;
+/** Share of a won tender the buyer pays up front */
+export const TENDER_ADVANCE = 0.15;
+/** Bids below this share of the market price look too cheap to deliver: the buyer rejects them */
+export const TENDER_MIN = 0.8;
+
+/** Your delivery record on contracts and tenders */
+export function trackRecord(w: WorldState): { done: number; failed: number } {
+  return w.play.track ?? { done: 0, failed: 0 };
 }
+
+/**
+ * What your record is worth to a buyer, as a share of price: each contract delivered in full
+ * counts 1%, each missed one costs 2%, between -8% and +8%.
+ */
+export function recordBonus(w: WorldState): number {
+  const r = trackRecord(w);
+  return clamp(0.01 * r.done - 0.02 * r.failed, -0.08, 0.08);
+}
+
+/** The lowest price the buyer accepts */
+export function tenderMinPrice(t: Tender): number {
+  return t.ref * TENDER_MIN;
+}
+
+/** Units a day a tender asks for */
+export function tenderPerDay(t: Tender): number {
+  return t.qtyPerMonth / 30;
+}
+
+/**
+ * How the buyer ranks a bid (lower is better): the price against the market, better quality,
+ * and whether the company can really deliver that much every day.
+ */
+export function tenderScore(t: Tender, price: number, quality: number, capacity = Infinity): number {
+  const strain = Math.max(0, tenderPerDay(t) / Math.max(1, capacity * JOB_CAP_SHARE) - 1);
+  return price / t.ref - QUALITY_WEIGHT * (quality - 1) + 0.6 * strain;
+}
+
+/** The price that gives this score for a bidder */
+function priceForScore(t: Tender, score: number, quality: number, capacity: number): number {
+  const strain = Math.max(0, tenderPerDay(t) / Math.max(1, capacity * JOB_CAP_SHARE) - 1);
+  return (score + QUALITY_WEIGHT * (quality - 1) - 0.6 * strain) * t.ref;
+}
+
+/** A plant's cost per extra unit (materials, staff, running costs: the plant's overheads are paid anyway) */
+export function tenderUnitCost(w: WorldState, c: Company): number {
+  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
+  return ue.materials + ue.other + ue.labour;
+}
+
+/** The lowest a rival will go: its full cost plus a margin that shrinks with how aggressive its owner is */
+function rivalFloor(w: WorldState, c: Company): number {
+  const aggr = rivalOf(w, c)?.personality.aggression ?? 0.5;
+  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
+  return Math.max(ue.total * (1.1 - 0.08 * aggr), refPrice(w, c.good) * 0.55);
+}
+
+const BIG_BUYERS: Partial<Record<GoodId, string[]>> = {};
 
 function makeTender(w: WorldState): Tender | null {
   const r = w.rng;
-  const goods = (Object.keys(GOV_BUYERS) as GoodId[]).filter((g) => !w.play.tenders.some((t) => t.good === g && t.status === 'open'));
+  const open = (g: GoodId) => !w.play.tenders.some((t) => t.good === g && t.status === 'open');
+  // Governments, and big companies that use the product
+  const users = (g: GoodId) => w.companies.filter((c) => !c.isPlayer && !c.bankrupt && c.capacity > GOODS[c.good].baseCapacity && GOODS[c.good].inputs.some((i) => i.good === g));
+  const goods = GOOD_IDS.filter((g) => open(g) && g !== 'banking' && (GOV_BUYERS[g] || users(g).length));
   const made = goods.filter((g) => mine(w).some((c) => c.good === g));
-  const g = made.length && next(r) < 0.6 ? pick(r, made) : goods.length ? pick(r, goods) : null;
+  const g = made.length && next(r) < 0.65 ? pick(r, made) : goods.length ? pick(r, goods) : null;
   if (!g) return null;
   const sellers = w.companies.filter((c) => c.good === g && !c.bankrupt);
-  const avgCap = sellers.length ? sellers.reduce((s, c) => s + c.capacity, 0) / sellers.length : GOODS[g].baseCapacity;
+  const yours = mine(w).filter((c) => c.good === g);
+  const base = yours.length ? Math.max(...yours.map((c) => c.capacity)) : sellers.length ? sellers.reduce((s, c) => s + c.capacity, 0) / sellers.length : GOODS[g].baseCapacity;
   const ref = refPrice(w, g);
   const ai = sellers.filter((c) => !c.isPlayer && rivalOf(w, c)).sort(() => next(r) - 0.5).slice(0, int(r, 2, 4));
   const bids = ai.map((c) => {
     const aggr = rivalOf(w, c)?.personality.aggression ?? 0.5;
-    const floor = Math.max(c.last.unitMaterialCost * 1.08, ref * 0.6);
-    return { companyId: c.id, name: c.name, price: Math.max(floor, ref * (1.02 - 0.15 * aggr - next(r) * 0.08)), quality: c.quality };
+    const floor = rivalFloor(w, c);
+    return { companyId: c.id, name: c.name, price: Math.max(floor * 1.04, ref * TENDER_MIN * 1.02, ref * (1.03 - 0.1 * aggr - next(r) * 0.06)), quality: c.quality, capacity: c.capacity };
   });
+  const big = users(g);
+  const company = (!GOV_BUYERS[g] || next(r) < 0.35) && big.length ? pick(r, big) : null;
   return {
-    id: `t${++w.seq}`, buyer: pick(r, GOV_BUYERS[g]!), good: g, qtyPerMonth: Math.round(avgCap * 30 * range(r, 0.2, 0.35)),
-    months: int(r, 3, 6), closes: w.day + 10, ref, bids, status: 'open',
+    id: `t${++w.seq}`, buyer: company ? company.name : pick(r, GOV_BUYERS[g] ?? BIG_BUYERS[g] ?? ['Government of Astoria']), buyerId: company?.id,
+    good: g, qtyPerMonth: Math.max(30, Math.round(base * 30 * range(r, 0.25, 0.45) / 10) * 10),
+    months: int(r, TENDER_MONTHS[0], TENDER_MONTHS[1]), closes: w.day + TENDER_OPEN_DAYS, ref, bids, status: 'open', opened: w.day,
   };
 }
 
-export function bidTender(w: WorldState, tenderId: string, companyId: string, price: number): CommandResult {
+function lead(t: Tender): { companyId: string; name: string; price: number; score: number; player: boolean } | null {
+  const field = t.bids.filter((b) => !b.out).map((b) => ({ companyId: b.companyId, name: b.name, price: b.price, score: tenderScore(t, b.price, b.quality, b.capacity ?? Infinity), player: false }));
+  if (t.mine) field.push({ companyId: t.mine.companyId, name: t.mine.name, price: t.mine.price, score: t.mine.score, player: true });
+  field.sort((a, b) => a.score - b.score);
+  return field[0] ?? null;
+}
+
+/** The leading bid right now (the one that would win if bidding closed) */
+export function tenderLeader(t: Tender) {
+  return lead(t);
+}
+
+/** Step into the tender room: rivals show their opening prices. */
+export function joinTender(w: WorldState, tenderId: string, companyId: string): CommandResult {
   if (!unlocked(w, 'tenders')) return fail('Tenders unlock at level 4');
   const t = w.play.tenders.find((x) => x.id === tenderId && x.status === 'open');
   const c = mine(w).find((x) => x.id === companyId);
   if (!t) return fail('That tender has closed');
   if (!c || c.good !== t.good) return fail(`You need a company that makes ${GOODS[t.good].name.toLowerCase()}`);
-  const full = t.mine?.companyId === c.id ? null : jobRoom(w, c, t.qtyPerMonth / 30);
+  if (t.room && t.room.companyId === c.id) return ok('Back in the tender room');
+  const full = jobRoom(w, c, tenderPerDay(t));
   if (full) return fail(full);
-  t.mine = { companyId, price: clamp(price, t.ref * 0.5, t.ref * 1.5) };
-  return ok(`Bid sent: ${fmtPrice(t.mine.price)} per ${GOODS[t.good].unit}`);
+  t.room = { companyId: c.id, round: 0, log: [`${t.bids.filter((b) => !b.out).length} rivals are bidding. Beat the best offer to lead.`] };
+  t.mine = undefined;
+  return ok('Bidding has started');
+}
+
+/** Your bid: it must beat the leader. Then the rivals answer, and some drop out. */
+export function bidInTender(w: WorldState, tenderId: string, price: number): CommandResult {
+  const t = w.play.tenders.find((x) => x.id === tenderId && x.status === 'open');
+  if (!t || !t.room) return fail('Start bidding first');
+  const c = mine(w).find((x) => x.id === t.room!.companyId);
+  if (!c) return fail('Company not found');
+  const p = clamp(price, t.ref * 0.5, t.ref * 1.5);
+  if (p < tenderMinPrice(t) - 1e-9) return fail(`${t.buyer} rejects bids below ${fmtPrice(tenderMinPrice(t))}: nobody can deliver that cheaply without cutting corners`);
+  const score = tenderScore(t, p, c.quality, c.capacity) - recordBonus(w);
+  const best = lead(t);
+  if (best && !best.player && score >= best.score - 1e-9) return fail(`Bid lower than ${fmtPrice(priceForScore(t, best.score, c.quality, c.capacity))} to lead`);
+  if (best?.player) return fail('You are already leading');
+  const room = t.room;
+  room.round += 1;
+  t.mine = { companyId: c.id, name: c.name, price: p, score };
+  room.log.push(`Round ${room.round}: you bid ${fmtPrice(p)}.`);
+  // Rivals answer: the one with the most room under its floor beats you by a little, the rest drop out once they can't
+  const r = w.rng;
+  const tired = room.round >= TENDER_ROUNDS;
+  const able: { b: Tender['bids'][number]; need: number; spare: number }[] = [];
+  for (const b of t.bids) {
+    if (b.out) continue;
+    const co = w.companies.find((x) => x.id === b.companyId && !x.bankrupt);
+    const floor = co ? rivalFloor(w, co) : b.price;
+    const need = priceForScore(t, score - (0.008 + next(r) * 0.012), b.quality, b.capacity ?? Infinity);
+    if (need < Math.max(floor, tenderMinPrice(t)) || tired || (room.round > 5 && chance(r, 0.25))) { b.out = true; room.log.push(`${b.name} drops out.`); continue; }
+    able.push({ b, need, spare: need - floor });
+  }
+  able.sort((a, z) => z.spare - a.spare);
+  const top = able[0];
+  if (!top) {
+    room.log.push('Nobody can beat you.');
+    finishTender(w, t);
+    return ok('You won the tender!');
+  }
+  top.b.price = top.need;
+  room.log.push(`${top.b.name} answers with ${fmtPrice(top.need)}.`);
+  return ok(`${top.b.name} bid lower: ${fmtPrice(top.need)}`);
+}
+
+/** Stop bidding: the best offer now wins. */
+export function passTender(w: WorldState, tenderId: string): CommandResult {
+  const t = w.play.tenders.find((x) => x.id === tenderId && x.status === 'open');
+  if (!t || !t.room) return fail('Start bidding first');
+  t.room.log.push('You stop bidding.');
+  finishTender(w, t);
+  return t.status === 'won' ? ok('You won the tender!') : ok(`${t.winner} wins the tender`);
+}
+
+/** Award the tender to the best bid. */
+function finishTender(w: WorldState, t: Tender): void {
+  const p = w.play;
+  const me = t.mine && mine(w).find((c) => c.id === t.mine!.companyId);
+  if (t.mine && me) t.mine.score = tenderScore(t, t.mine.price, me.quality, me.capacity) - recordBonus(w);
+  if (t.mine && (!me || jobRoom(w, me, tenderPerDay(t)))) t.mine = undefined; // can no longer take it on
+  const win = lead(t);
+  if (!win) { t.status = 'closed'; return; }
+  t.winner = win.name;
+  t.winPrice = win.price;
+  const qty = t.qtyPerMonth * t.months;
+  if (win.player && me) {
+    t.status = 'won';
+    p.jobs.push({
+      id: `j${++w.seq}`, source: 'tender', buyerName: t.buyer, buyerId: t.buyerId, good: t.good, qty, delivered: 0, pay: qty * win.price, bonus: 0, penalty: 0,
+      days: t.months * 30, startDay: w.day, deadline: w.day + t.months * 30, companyId: me.id, status: 'active', offerUntil: w.day, checked: w.day, advance: TENDER_ADVANCE,
+    });
+    const upfront = qty * win.price * TENDER_ADVANCE;
+    me.cash += upfront;
+    const payer = t.buyerId ? w.companies.find((x) => x.id === t.buyerId && !x.bankrupt) : undefined;
+    if (payer) payer.cash -= upfront;
+    addXpLater(w, 150 + 15 * t.months);
+    banner(w, 'Tender won!', `${t.buyer} picked ${me.name}: ${qty.toLocaleString()} ${GOODS[t.good].unit} over ${t.months} months at ${fmtPrice(win.price)}. ${fmtMoney(upfront)} paid up front.`, 150 + 15 * t.months, 'good');
+    addNews(w, 'player', `${me.name} wins the ${t.buyer} tender`, `Worth ${fmtMoney(qty * win.price)} over ${t.months} months.`, 'good', [me.id]);
+  } else {
+    t.status = t.room ? 'lost' : 'closed';
+    if (t.room) banner(w, 'Tender lost', `${win.name} won ${t.buyer} at ${fmtPrice(win.price)} per ${GOODS[t.good].unit}`, 0, 'bad');
+    addNews(w, 'business', `${win.name} wins the ${t.buyer} tender`, `${qty.toLocaleString()} ${GOODS[t.good].unit} of ${GOODS[t.good].name.toLowerCase()} over ${t.months} months at ${fmtPrice(win.price)}.`, 'neutral');
+    const co = w.companies.find((c) => c.id === win.companyId);
+    if (co) co.brand = clamp(co.brand + 0.02, 0.5, 1.7);
+  }
+}
+
+/** Long tenders are checked every month: a short month costs a fine on what is missing. */
+function monthlyTenderCheck(w: WorldState): void {
+  for (const j of w.play.jobs) {
+    if (j.source !== 'tender' || j.status !== 'active' || j.checked == null || w.day - j.checked < 30) continue;
+    j.checked = w.day;
+    const due = (j.qty * Math.min(j.days, w.day - j.startDay)) / j.days;
+    const short = due * 0.9 - j.delivered;
+    if (short <= 0) continue;
+    const fine = (short * j.pay / j.qty) * 0.1;
+    const c = w.companies.find((x) => x.id === j.companyId);
+    if (c) c.cash -= fine;
+    banner(w, 'Tender delivery short', `${j.buyerName} is ${Math.round(short).toLocaleString()} ${GOODS[j.good].unit} behind: fined ${fmtMoney(fine)}`, 0, 'bad');
+  }
 }
 
 function dailyTenders(w: WorldState): void {
   const p = w.play;
-  for (const t of p.tenders) {
-    if (t.status !== 'open' || w.day < t.closes) continue;
-    const field = [...t.bids.map((b) => ({ ...b, score: tenderScore(t, b.price, b.quality), player: false }))];
-    const me = t.mine && mine(w).find((c) => c.id === t.mine!.companyId);
-    if (me && t.mine && !jobRoom(w, me, t.qtyPerMonth / 30)) field.push({ companyId: me.id, name: me.name, price: t.mine.price, quality: me.quality, score: tenderScore(t, t.mine.price, me.quality), player: true });
-    field.sort((a, b) => a.score - b.score);
-    const win = field[0];
-    if (!win) { t.status = 'closed'; continue; }
-    t.winner = win.name;
-    t.winPrice = win.price;
-    if (win.player && me) {
-      t.status = 'won';
-      const qty = t.qtyPerMonth * t.months;
-      p.jobs.push({
-        id: `j${++w.seq}`, source: 'tender', buyerName: t.buyer, good: t.good, qty, delivered: 0, pay: qty * win.price, bonus: 0, penalty: 0,
-        days: t.months * 30, startDay: w.day, deadline: w.day + t.months * 30, companyId: me.id, status: 'active', offerUntil: w.day,
-      });
-      addXpLater(w, 150);
-      banner(w, 'Tender won!', `${t.buyer} picked ${me.name}: ${qty.toLocaleString()} ${GOODS[t.good].unit} over ${t.months} months at ${fmtPrice(win.price)}`, 150, 'good');
-      addNews(w, 'player', `${me.name} wins the ${t.buyer} tender`, `Worth ${fmtMoney(qty * win.price)} over ${t.months} months.`, 'good', [me.id]);
-    } else {
-      t.status = t.mine ? 'lost' : 'closed';
-      if (t.mine) banner(w, 'Tender lost', `${win.name} won ${t.buyer} at ${fmtPrice(win.price)} per ${GOODS[t.good].unit}`, 0, 'bad');
-      const co = w.companies.find((c) => c.id === win.companyId);
-      if (co) co.brand = clamp(co.brand + 0.02, 0.5, 1.7);
-    }
-  }
+  monthlyTenderCheck(w);
+  for (const t of p.tenders) if (t.status === 'open' && w.day >= t.closes) finishTender(w, t);
   p.tenders = p.tenders.filter((t) => t.status === 'open' || w.day - t.closes < 30);
   if (!unlocked(w, 'tenders')) return;
   const gap = w.macro.growth < 0.01 ? 10 : 18; // governments spend more in a slowdown

@@ -2,9 +2,10 @@
  * Running a business day to day: winning and keeping customers, machines that wear out,
  * staff who learn on the job (and leave when unhappy), and the managers you can hire.
  */
-import { GOODS, GOOD_IDS, maxPriceMult } from './data';
-import { MAINT, NEW_HIRE_SKILL, WEAR_PER_DAY, boostMult, clamp, refPrice, reachOf } from './company';
+import { GOODS, GOOD_IDS } from './data';
+import { MAINT, NEW_HIRE_SKILL, WEAR_PER_DAY, boostMult, clamp, reachOf } from './company';
 import { campaignMult } from './strategy';
+import { execSkill } from './execs';
 import type { Company, GoodId, WorldState } from './types';
 
 /** Satisfaction a company settles at: orders filled, quality and price against the market */
@@ -25,7 +26,8 @@ export function reachTarget(c: Company): number {
 
 /** Share of the gap to the target closed each day while winning customers */
 export function reachSpeed(w: WorldState, c: Company): number {
-  return (0.006 + 0.12 * c.marketingPct + (campaignMult(w, c) > 1 ? 0.006 : 0)) * TIER_SPEED[GOODS[c.good].tier];
+  const sales = c.isPlayer ? 1 + 0.25 * Math.min(1.4, execSkill(w, 'sales')) : 1; // a head of sales wins customers faster
+  return (0.006 + 0.12 * c.marketingPct + (campaignMult(w, c) > 1 ? 0.006 : 0)) * TIER_SPEED[GOODS[c.good].tier] * sales;
 }
 
 /** Factories buying raw materials switch supplier on price faster than shoppers switch brands */
@@ -78,7 +80,8 @@ export function dailyBusiness(w: WorldState): void {
     // Machines wear with use; maintenance restores them
     const use = clamp(c.last.produced / Math.max(1, c.capacity), 0, 1.2);
     const cond = c.condition ?? 1;
-    c.condition = clamp(cond - WEAR_PER_DAY * use + MAINT[c.maintenance ?? 'normal'].fix, 0, 1);
+    const careful = 1 - 0.3 * Math.min(1.4, c.execOps ?? 0); // an operations chief cuts wear
+    c.condition = clamp(cond - WEAR_PER_DAY * use * careful + MAINT[c.maintenance ?? 'normal'].fix, 0, 1);
     // New hires learn on the job; unhappy staff leave (and the replacements start green)
     const skill = c.skill ?? 1;
     if (skill < 1) c.skill = skill + (1 - skill) * 0.02;
@@ -92,26 +95,6 @@ export function hireStaff(c: Company, hires: number): void {
   if (hires <= 0) return;
   if (c.isPlayer) c.skill = ((c.skill ?? 1) * c.workers + NEW_HIRE_SKILL * hires) / Math.max(1, c.workers + hires);
   c.workers += hires;
-}
-
-/** Weekly: a top manager keeps maintenance up and nudges the price like a seasoned operator. */
-export function weeklyManagers(w: WorldState): void {
-  for (const c of w.companies) {
-    if (!c.isPlayer || c.bankrupt || c.manager !== 'pro') continue;
-    if ((c.maintenance ?? 'normal') === 'low') c.maintenance = 'normal';
-    if ((c.condition ?? 1) < 0.8) c.maintenance = 'high';
-    else if (c.maintenance === 'high' && (c.condition ?? 1) > 0.95) c.maintenance = 'normal';
-    const r = c.sum30;
-    const fill = r.demand > 0 ? r.sold / r.demand : 1;
-    const invDays = c.inventory / Math.max(1, c.last.demand);
-    const util = r.sold / Math.max(1, r.capacity * 30);
-    const unitCost = (r.cogs + r.wages + r.fixed) / Math.max(1, r.sold);
-    const ref = refPrice(w, c.good);
-    const cap = Math.min(1.3, maxPriceMult(c.good));
-    if (fill < 0.97 && invDays < 0.3 && c.priceMult * 1.02 <= cap) c.priceMult *= 1.02;
-    else if ((invDays > 1.5 || util < 0.7) && ref * c.priceMult * 0.98 > unitCost * 1.03) c.priceMult *= 0.98;
-    c.priceMult = clamp(c.priceMult, 0.6, cap);
-  }
 }
 
 /** How many customers a company has, in words */

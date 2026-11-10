@@ -6,7 +6,7 @@ import { listSaves, loadSettings, readSave, saveSettings, writeSave } from '../p
 
 export type Tab = 'home' | 'business' | 'markets' | 'world' | 'more';
 export type Route =
-  | { screen: 'company'; id: string }
+  | { screen: 'company'; id: string; tab?: string }
   | { screen: 'stock'; ticker: string }
   | { screen: 'rival'; id: string }
   | { screen: 'news' }
@@ -21,11 +21,15 @@ export type Route =
   | { screen: 'article'; id: string }
   | { screen: 'strategy'; tab?: StrategyTab }
   | { screen: 'reports' }
-  | { screen: 'inbox' };
+  | { screen: 'inbox' }
+  | { screen: 'tender'; id: string }
+  | { screen: 'budget' }
+  | { screen: 'execs' }
+  | { screen: 'country'; id: string };
 
 export type StrategyTab = 'contracts' | 'auctions' | 'tenders' | 'warehouses' | 'wars' | 'tips';
 
-export type GuideSection = 'about' | 'play' | 'grow' | 'business' | 'markets' | 'deals' | 'strategies' | 'rivals';
+export type GuideSection = 'about' | 'play' | 'win' | 'grow' | 'business' | 'markets' | 'deals' | 'strategies' | 'economy' | 'world' | 'rivals';
 
 interface GameStore {
   world: WorldState | null;

@@ -23,6 +23,12 @@ interface Candidate {
  * Weekly corporate strategy: score candidate actions with
  * U(a) = w1 Profit + w2 Growth + w3 Synergy + w4 Strategic - w5 Risk - w6 Cost, pick the best.
  */
+/** A small expansion adds this much capacity, for this share of a full upgrade's cost */
+export const EXPAND_STEP = 0.12;
+/** Operating margin below which rivals stop cutting price to win share */
+export const COMPETE_MARGIN = 0.12;
+export const EXPAND_COST = 0.22;
+
 export function corporateAI(w: WorldState, c: Company): void {
   if (c.isPlayer || c.bankrupt) return;
   const pers = personalityFor(w, c);
@@ -68,6 +74,30 @@ export function corporateAI(w: WorldState, c: Company): void {
       },
     });
   }
+  // Small steps: a busy, profitable plant adds a shift or a new line (+12%) instead of waiting for a full upgrade
+  const tight = w.goods[c.good]?.tightness ?? 0.87;
+  // ...but not while another seller of this product still has idle plant (a newcomer still winning buyers)
+  // and only if the market would still be busy afterwards (no flooding it)
+  const sellers = w.companies.filter((x) => x.good === c.good && !x.bankrupt);
+  const slack = sellers.some((x) => x !== c && x.sum30.sold < x.capacity * 30 * 0.75);
+  const mktCap = sellers.reduce((s, x) => s + x.capacity, 0);
+  const tightAfter = (tight * mktCap) / (mktCap + c.capacity * EXPAND_STEP);
+  if (util > 0.9 && tightAfter >= 0.87 && margin > 0.08 && !slack && w.day - (c.lastExpand ?? -999) >= 90) {
+    const cost = nextUpgradeCost(c) * EXPAND_COST;
+    if (c.cash > cost * 1.5) {
+      cands.push({
+        id: 'expand',
+        utility: 2 * (util - 0.9) + 2 * (tightAfter - 0.87) + 0.6 * (margin - 0.08) + 0.1 * pers.ambition,
+        apply: () => {
+          c.cash -= cost;
+          c.capacity *= 1 + EXPAND_STEP;
+          c.assets += cost;
+          c.lastExpand = w.day;
+          w.macro.capexMonth += cost;
+        },
+      });
+    }
+  }
   // Pricing: never above what importers charge, never below what it costs to make
   const ref = refPrice(w, c.good);
   const pmCap = Math.min(1.35, maxPriceMult(c.good), (importPrice(w, c.good) / ref) * 0.97);
@@ -86,6 +116,17 @@ export function corporateAI(w: WorldState, c: Company): void {
     utility: canCut ? (invDays > 1.5 ? 0.6 : 0) + (util < 0.7 ? 0.4 : 0) * pers.aggression + (fillRate >= 0.999 && margin > 0.15 ? 0.15 : 0) : -1,
     apply: () => { c.priceMult = clamp(c.priceMult * 0.97, 0.6, pmCap); },
   });
+  // Competition: with idle plant and fat margins, win buyers from rivals by being cheaper.
+  // A rival that sees a competitor clearly cheaper than itself follows it down. Margins stop near COMPETE_MARGIN.
+  if (!GOODS[c.good].reg && canCut && util < 0.93 && margin > COMPETE_MARGIN) {
+    const others = w.companies.filter((x) => x !== c && x.good === c.good && !x.bankrupt && x.sum30.sold > 0);
+    const undercut = others.some((x) => x.priceMult < c.priceMult * 0.95);
+    cands.push({
+      id: 'compete',
+      utility: others.length ? 0.2 + 2 * (margin - COMPETE_MARGIN) + 0.3 * pers.aggression + (undercut ? 0.35 : 0) + (0.93 - util) : -1,
+      apply: () => { c.priceMult = clamp(c.priceMult * 0.97, 0.6, pmCap); },
+    });
+  }
   if (margin < -0.02 && c.priceMult < 1 && ref * c.priceMult < unitCost) {
     cands.push({ id: 'stopLoss', utility: 0.7, apply: () => { c.priceMult = clamp(c.priceMult * 1.04, 0.6, pmCap); } });
   }

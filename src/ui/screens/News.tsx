@@ -6,10 +6,11 @@ import { Box, P, Tile, Windows, pts } from '../art/iso';
 import { GoodBuilding } from '../art/plants';
 import { IconBack } from '../components/Icons';
 import { cx } from '../components/core';
+import { MarketWatch } from './MarketWatch';
 
 type Filter = 'all' | NewsCategory;
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'Front page' }, { id: 'player', label: 'You' }, { id: 'business', label: 'Business' }, { id: 'market', label: 'Markets' },
+  { id: 'all', label: 'Front page' }, { id: 'market', label: 'Markets & tips' }, { id: 'player', label: 'You' }, { id: 'business', label: 'Business' },
   { id: 'economy', label: 'Economy' }, { id: 'commodities', label: 'Commodities' }, { id: 'technology', label: 'Tech' },
 ];
 
@@ -60,7 +61,9 @@ export function NewsScreen() {
             ))}
           </nav>
           {!top && <p className="py-8 text-center text-[var(--ink-2)]">No stories in this section yet.</p>}
+          {f === 'market' && <MarketWatch w={w} />}
           {top && <TopStory n={top} w={w} onOpen={() => open(top)} />}
+          {f === 'all' && <MarketWatch w={w} />}
           {pair.length > 0 && (
             <div className="grid grid-cols-2 border-t-2 border-[var(--ink)] mt-3">
               {pair.map((n, i) => <Feature key={n.id} n={n} w={w} onOpen={() => open(n)} first={i === 0} />)}

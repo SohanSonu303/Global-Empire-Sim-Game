@@ -2,7 +2,8 @@ import { isStoring } from './warehouse';
 import { AI_UPGRADE_COST_GROWTH, GOODS, INDUSTRIES, IMPORT_PREMIUM, UPGRADE_COST_GROWTH, fixedAt, upgradeCost, LEVEL_CAP_MULT, MAX_LEVEL, maxPriceMult } from './data';
 import { payOwners } from './ownership';
 import { noteOpsSaved } from './traits';
-import type { Boost, Company, DayResult, Explanation, GoodId, LoanReason, MaintLevel, ManagerId, WorldState } from './types';
+import { RAW_UPKEEP } from './resources';
+import type { Boost, Company, DayResult, Explanation, GoodId, IndustryId, LoanReason, MaintLevel, ManagerId, WorldState } from './types';
 
 export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -20,9 +21,9 @@ export function refPrice(w: WorldState, good: GoodId): number {
   return GOODS[good].p0 * w.macro.priceLevel * (w.goods?.[good]?.idx ?? 1);
 }
 
-/** World price index for a good (only oil moves with world events). */
+/** World price index for a good: oil moves with world events, and every good with shortages and gluts abroad (trade.ts). */
 export function worldIdx(w: WorldState, good: GoodId): number {
-  return good === 'crude_oil' ? w.macro.oilPrice : 1;
+  return (good === 'crude_oil' ? w.macro.oilPrice : 1) * (w.play?.trade?.world?.[good] ?? 1);
 }
 
 /** What an importer charges: always available, never cheap. */
@@ -32,7 +33,7 @@ export function importPrice(w: WorldState, good: GoodId): number {
 
 /** A company's selling price today. */
 export function sellPrice(w: WorldState, c: Company): number {
-  return refPrice(w, c.good) * Math.min(c.priceMult * boostMult(c, 'price'), maxPriceMult(c.good));
+  return refPrice(w, c.good) * Math.min(c.priceMult * boostMult(c, 'price'), maxPriceMult(c.good) + (c.labFx?.price ?? 0));
 }
 
 // ---------- running a business: customers, machines, staff, managers ----------
@@ -71,8 +72,8 @@ export const WEAR_PER_DAY = 0.0012;
 /** Day-to-day managers for your companies: a share of revenue, with a daily minimum */
 export const MANAGERS: Record<ManagerId, { label: string; pct: number; min: number; blurb: string }> = {
   none: { label: 'You', pct: 0, min: 0, blurb: 'You answer every decision yourself. Free, and the best results if you pay attention.' },
-  basic: { label: 'Manager', pct: 0.01, min: 250, blurb: 'Answers the inbox with safe, middle-of-the-road choices after a couple of days.' },
-  pro: { label: 'Top manager', pct: 0.025, min: 900, blurb: 'Answers the inbox with the best choice right away, keeps maintenance up and tunes the price each week.' },
+  basic: { label: 'Manager', pct: 0.01, min: 250, blurb: 'Answers the inbox with safe choices after a couple of days, keeps the machines and the stock room in order, and reports each week.' },
+  pro: { label: 'Top manager', pct: 0.025, min: 900, blurb: 'Runs the company for you: best inbox answers at once, and each week it tunes price, marketing, R&D, pay, stock, the warehouse share and dividends. It recommends upgrades and deals in a weekly report; you approve them.' },
 };
 
 export function maintCostPerDay(w: WorldState, c: Company): number {
@@ -90,8 +91,9 @@ export function conditionMult(c: Company): number {
   return 0.85 + 0.15 * (c.condition ?? 1);
 }
 
-export function wageIndex(w: WorldState): number {
-  return w.macro.priceLevel;
+/** Wages today: the price level, times how scarce workers are in that industry (macro.ts labour market) */
+export function wageIndex(w: WorldState, industry?: IndustryId): number {
+  return w.macro.priceLevel * (industry ? w.macro.labour?.[industry]?.mult ?? 1 : 1);
 }
 
 export function salaryOf(c: Pick<Company, 'industry'>): number {
@@ -99,7 +101,7 @@ export function salaryOf(c: Pick<Company, 'industry'>): number {
 }
 
 /** Per-unit cost breakdown at today's market prices for a company (or a new level-1 one). */
-export function unitEconomics(w: WorldState, good: GoodId, opts?: { level?: number; util?: number; salaryMult?: number; morale?: number; inputs?: Company['inputs'] }) {
+export function unitEconomics(w: WorldState, good: GoodId, opts?: { level?: number; util?: number; salaryMult?: number; morale?: number; inputs?: Company['inputs']; player?: boolean; maintenance?: MaintLevel; newcomer?: boolean }) {
   const def = GOODS[good];
   const pl = w.macro.priceLevel;
   const level = opts?.level ?? 1;
@@ -112,16 +114,19 @@ export function unitEconomics(w: WorldState, good: GoodId, opts?: { level?: numb
   const materials = inputs.reduce((s, i) => s + i.cost, 0);
   const other = def.vc * pl;
   const prod = def.unitsPerWorker * (0.6 + 0.5 * (opts?.morale ?? 0.75));
-  const labour = (INDUSTRIES[def.industry].salary * (opts?.salaryMult ?? 1) * pl) / prod;
+  // A newcomer keeps ~10% spare staff while it finds its feet (the hiring buffer)
+  const labour = (INDUSTRIES[def.industry].salary * (opts?.salaryMult ?? 1) * wageIndex(w, def.industry) * (opts?.newcomer ? 1.1 : 1)) / prod;
   const capacity = def.baseCapacity * Math.pow(LEVEL_CAP_MULT, level - 1);
-  const fixed = (fixedAt(good, level) * pl) / (capacity * util);
+  // Upkeep as the books charge it: machine care, and the extra cost of digging your own mine
+  const upkeep = (opts?.player && def.tier === 'raw' ? RAW_UPKEEP : 1) + MAINT[opts?.maintenance ?? 'normal'].cost;
+  const fixed = (fixedAt(good, level) * pl * upkeep) / (capacity * util);
   const total = materials + other + labour + fixed;
   const price = refPrice(w, good);
   return { inputs, materials, other, labour, fixed, total, price, margin: price > 0 ? (price - total) / price : 0, capacity };
 }
 
 export function productivity(c: Company): number {
-  return GOODS[c.good].unitsPerWorker * (0.6 + 0.5 * c.morale) * (c.isPlayer && c.ops ? 1.05 : 1) * (c.skill ?? 1) * conditionMult(c) * boostMult(c, 'productivity');
+  return GOODS[c.good].unitsPerWorker * (0.6 + 0.5 * c.morale) * (c.isPlayer && c.ops ? 1.05 : 1) * (c.execOps ? 1 + 0.05 * Math.min(1.4, c.execOps) : 1) * (c.skill ?? 1) * conditionMult(c) * boostMult(c, 'productivity');
 }
 
 /** Staff needed to run at full capacity. */
@@ -199,7 +204,7 @@ export function applyUpgrade(w: WorldState, c: Company): void {
 export function finishDay(w: WorldState, c: Company, r: DayResult): void {
   const brandTarget = clamp(0.7 + c.marketingPct * 9, 0.6, 1.6);
   c.brand += (brandTarget - c.brand) * 0.01;
-  const qualTarget = clamp(0.8 + c.rdPct * INDUSTRIES[c.industry].rdK, 0.6, 1.6);
+  const qualTarget = clamp(0.8 + c.rdPct * INDUSTRIES[c.industry].rdK, 0.6, 1.6) + (c.labFx?.quality ?? 0); // lab gains and patents add on top
   c.quality += (qualTarget - c.quality) * 0.004;
 
   const overwork = clamp(r.produced / Math.max(1, c.workers * productivity(c)) - 1, 0, 1);
@@ -222,6 +227,9 @@ export function finishDay(w: WorldState, c: Company, r: DayResult): void {
   if (c.hist.length > 180) c.hist.shift();
 }
 
+/** Staff above this share of what demand needs (which already has a 10% buffer) are let go, slowly */
+export const OVERSTAFF = 1.15;
+
 /** Automation policies that run daily (for player companies and AI alike). */
 export function runAutomation(w: WorldState, c: Company): void {
   if (c.bankrupt) return;
@@ -232,7 +240,7 @@ export function runAutomation(w: WorldState, c: Company): void {
     const need = isStoring(w, c) ? workersNeeded(c) : workersForDemand(c);
     if (c.workers < need) {
       const hires = Math.ceil(Math.min(need - c.workers, Math.max(2, c.workers * 0.15)));
-      const hireCost = hires * salary * 5 * wageIndex(w);
+      const hireCost = hires * salary * 5 * wageIndex(w, c.industry);
       if (c.cash < hireCost) {
         // Recruiting may draw on the credit line: idle capacity costs more than the loan
         drawCredit(w, c, hireCost - c.cash, 'hiring');
@@ -243,7 +251,7 @@ export function runAutomation(w: WorldState, c: Company): void {
         c.workers += hires;
         c.cash -= hireCost;
       }
-    } else if (c.workers > need * 1.25) {
+    } else if (c.workers > need * OVERSTAFF) {
       c.workers = Math.max(need, c.workers * 0.97);
       c.morale = Math.max(0, c.morale - 0.01);
     }

@@ -480,6 +480,11 @@ const ISLANDS = [
   { id: 'nordland', name: 'Nordland', d: 'M196 34 Q226 10 284 20 Q326 30 320 62 Q314 92 270 96 Q222 98 204 76 Q188 56 196 34 Z', lx: 258, ly: 58, land: '#6f8a5a', flag: ['#c0392b', '#e9eef7'] },
   { id: 'bharatara', name: 'Bharatara', d: 'M26 172 Q48 146 100 150 Q140 156 142 190 Q140 228 98 236 Q54 240 34 216 Q18 196 26 172 Z', lx: 82, ly: 196, land: '#a3864a', flag: ['#f0a33a', '#3dbb6c'] },
   { id: 'meridian', name: 'East Meridian', d: 'M206 164 Q234 140 290 150 Q330 160 326 196 Q322 230 276 236 Q230 240 212 214 Q196 190 206 164 Z', lx: 266, ly: 196, land: '#4f8a7a', flag: ['#4a8fe0', '#e3b04b'] },
+  { id: 'zanbel', name: 'Zanbel', d: 'M160 130 Q162 113 184 114 Q200 116 199 126 Q197 143 178 142 Q159 140 160 130 Z', lx: 180, ly: 120, land: '#5aa06a', flag: ['#2bb3a3', '#f0c565'] },
+  { id: 'kestria', name: 'Kestria', d: 'M10 292 Q12 264 52 265 Q86 267 85 288 Q83 316 46 315 Q9 313 10 292 Z', lx: 48, ly: 282, land: '#8fa24a', flag: ['#3dbb6c', '#f3e6cf'] },
+  { id: 'solvara', name: 'Solvara', d: 'M94 292 Q96 264 134 265 Q166 267 165 288 Q163 316 128 315 Q93 313 94 292 Z', lx: 130, ly: 282, land: '#c9a45a', flag: ['#1f7a4a', '#e9eef7'] },
+  { id: 'varnholm', name: 'Varnholm', d: 'M176 292 Q178 264 216 265 Q248 267 247 288 Q245 316 210 315 Q175 313 176 292 Z', lx: 212, ly: 282, land: '#7a7f74', flag: ['#4a4f5a', '#e2574c'] },
+  { id: 'tavora', name: 'Tavora', d: 'M258 292 Q260 264 298 265 Q330 267 329 288 Q327 316 292 315 Q257 313 258 292 Z', lx: 294, ly: 282, land: '#4f7a8a', flag: ['#7a4ae0', '#e9eef7'] },
 ];
 
 function Crane({ x, y }: { x: number; y: number }) {
@@ -544,14 +549,24 @@ function Landmarks({ id }: { id: string }) {
           <g transform="translate(270 168) scale(0.32)"><TechTower level={5} /></g>
         </g>
       );
+    case 'kestria':
+      return <g>{[[30, 284], [42, 296], [56, 282], [64, 298]].map(([x, y], i) => <g key={i} transform={`translate(${x} ${y}) scale(0.5)`}><Tree x={0} y={0} seed={i + 2} /></g>)}</g>;
+    case 'solvara':
+      return <g><g transform="translate(124 278) scale(0.34)"><OilGas level={5} /></g></g>;
+    case 'varnholm':
+      return <g><g transform="translate(204 278) scale(0.34)"><Factory level={6} /></g></g>;
+    case 'tavora':
+      return <g><g transform="translate(290 274) scale(0.3)"><TechTower level={6} /></g></g>;
+    case 'zanbel':
+      return <g><g transform="translate(176 126) scale(0.45)"><Tree x={0} y={0} seed={7} /></g></g>;
     default:
       return null;
   }
 }
 
-export function WorldMap({ selected, onSelect }: { selected: string; onSelect: (id: string) => void }) {
+export function WorldMap({ selected, onSelect, marks }: { selected: string; onSelect: (id: string) => void; marks?: Record<string, string> }) {
   return (
-    <svg viewBox="0 0 340 260" className="w-full block" role="group" aria-label="World map">
+    <svg viewBox="0 0 340 330" className="w-full block" role="group" aria-label="World map">
       <defs>
         <radialGradient id="wm-sea" cx="0.5" cy="0.5" r="0.75">
           <stop offset="0" stopColor="#2a6fa3" />
@@ -564,9 +579,9 @@ export function WorldMap({ selected, onSelect }: { selected: string; onSelect: (
           </linearGradient>
         ))}
       </defs>
-      <rect width="340" height="260" fill="url(#wm-sea)" />
+      <rect width="340" height="330" fill="url(#wm-sea)" />
       {[...Array(34)].map((_, i) => {
-        const x = hash01(i, 11) * 330, y = hash01(i, 12) * 250;
+        const x = hash01(i, 11) * 330, y = hash01(i, 12) * 320;
         return <path key={i} d={`M${x} ${y} q3 -2.4 6 0 t6 0`} stroke="#9fd0ff" strokeWidth="0.8" fill="none" opacity="0.35" />;
       })}
       {/* trade routes */}
@@ -576,6 +591,11 @@ export function WorldMap({ selected, onSelect }: { selected: string; onSelect: (
         <path d="M148 104 Q182 150 210 176" />
         <path d="M262 98 L268 150" />
         <path d="M140 196 Q172 210 206 200" />
+        <path d="M70 130 Q40 220 48 262" />
+        <path d="M120 128 Q140 220 130 262" />
+        <path d="M150 110 Q166 118 160 124" />
+        <path d="M146 112 Q200 230 212 262" />
+        <path d="M150 100 Q300 200 294 262" />
       </g>
       {ISLANDS.map((is) => {
         const active = selected === is.id;
@@ -593,10 +613,11 @@ export function WorldMap({ selected, onSelect }: { selected: string; onSelect: (
               <rect x="0" y="-11" width="9" height="3" fill={is.flag[1]} />
             </g>
             <MapLabel x={is.lx} y={is.ly + 22} text={is.name} active={active} />
+            {marks?.[is.id] && <circle cx={is.lx + is.name.length * 2.6 + 6} cy={is.ly + 19} r="3.6" fill={marks[is.id]} stroke="#0c1525" strokeWidth="0.8" />}
           </g>
         );
       })}
-      <Ship x={178} y={120} />
+      <Ship x={160} y={150} />
       <Ship x={176} y={232} flip />
       <Ship x={20} y={140} flip />
       {/* compass */}

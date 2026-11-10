@@ -13,11 +13,14 @@ import { Strategies } from './GuideStrategies';
 const SECTIONS: { id: GuideSection; label: string }[] = [
   { id: 'about', label: 'The game' },
   { id: 'play', label: 'How to play' },
+  { id: 'win', label: 'How to win' },
   { id: 'grow', label: 'How to grow' },
   { id: 'business', label: 'Grow a business' },
   { id: 'markets', label: 'Stocks' },
   { id: 'deals', label: 'Stakes, takeovers & banks' },
   { id: 'strategies', label: 'Business strategies' },
+  { id: 'economy', label: 'A living economy' },
+  { id: 'world', label: 'The world' },
   { id: 'rivals', label: 'Beat rivals' },
 ];
 
@@ -37,11 +40,14 @@ export function GuideScreen({ section = 'about' }: { section?: GuideSection }) {
       <Screen>
         {tab === 'about' && <About />}
         {tab === 'play' && <Play />}
+        {tab === 'win' && <Win />}
         {tab === 'grow' && <Grow />}
         {tab === 'business' && <Business />}
         {tab === 'markets' && <Markets />}
         {tab === 'deals' && <Deals />}
         {tab === 'strategies' && <Strategies />}
+        {tab === 'economy' && <Economy />}
+        {tab === 'world' && <World />}
         {tab === 'rivals' && <Rivals />}
         <div className="flex gap-2 mt-6">
           <Button variant="dark" block disabled={idx === 0} onClick={() => go(idx - 1)}>Back</Button>
@@ -129,7 +135,8 @@ function About() {
       <Card className="p-4">
         <p className="text-sm leading-relaxed">
           Five billionaires already run Astoria. Your score is your <b className="text-gold">net worth</b>, which is your cash,
-          plus the value of your companies, plus your shares, minus your loans. Pass all five rivals to win.
+          plus the value of your companies, plus your shares, minus your loans. Climb the rich list past every rival to
+          become number one. The How to win page shows the way.
         </p>
         <div className="grid grid-cols-2 gap-2 mt-3">
           <div className="rounded-lg bg-surface border border-line p-3">
@@ -203,9 +210,123 @@ function Play() {
         <Lever icon={<IconHome size={18} />} name="Home" effect="Your city, your assistant, your money and today's goals." tip="Tap a building to open that company, or an empty plot to plan one." />
         <Lever icon={<IconBriefcase size={18} />} name="Business" effect="All your companies and the supply chain map. A dot means one needs attention." tip="Tap + New to open the planner and start another company." />
         <Lever icon={<IconChart size={18} />} name="Markets" effect="The stock exchange. Buy and sell shares of 20 companies." tip="The mood bar shows if investors feel bullish or bearish." />
-        <Lever icon={<IconGlobe size={18} />} name="World" effect="Astoria's economy: growth, inflation, jobs and interest rates." tip="High interest rates make loans expensive." />
+        <Lever icon={<IconGlobe size={18} />} name="World" effect="Astoria's economy: growth, inflation, jobs and interest rates. From level 5, the other eight countries and trade with them." tip="High interest rates make loans expensive." />
         <Lever icon={<IconDots size={18} />} name="More" effect="Newspaper, rivals, statistics, achievements, saves and this guide." tip="Read the newspaper to see what rivals are doing." />
       </Card>
+    </>
+  );
+}
+
+function Win() {
+  const w = useGame((s) => s.world)!;
+  const ranked = [...w.rivals].sort((a, b) => rivalWorth(w, b) - rivalWorth(w, a));
+  const nw = netWorth(w);
+  const above = ranked.filter((r) => rivalWorth(w, r) > nw).length;
+  return (
+    <>
+      <Hero art={<div className="text-6xl">🏆</div>} title="Become the richest in Astoria">
+        You win by passing every rival on the rich list. Your score is your net worth: cash, plus what your companies
+        and shares are worth, minus your loans.
+      </Hero>
+      <Card className="p-4 mt-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-surface border border-line p-3">
+            <div className="text-xs text-muted">Your rank</div>
+            <div className="num text-lg font-bold">#{above + 1} of {ranked.length + 1}</div>
+          </div>
+          <div className="rounded-lg bg-surface border border-line p-3">
+            <div className="text-xs text-muted">Next to pass</div>
+            <div className="text-sm font-bold text-gold truncate">{above > 0 ? ranked[above - 1].name : 'Nobody: you are #1'}</div>
+            {above > 0 && <div className="num text-xs text-muted">{fmtMoney(rivalWorth(w, ranked[above - 1]))}</div>}
+          </div>
+        </div>
+      </Card>
+      <SectionTitle>The road to number one</SectionTitle>
+      <Steps
+        items={[
+          { title: '1. One profitable company', body: 'Pick a product that is short (the Planner shows it). Hire until output nears capacity and price close to the market. Most plants pay back in one to two years.' },
+          { title: '2. Grow it, then build a chain', body: 'Upgrade when it sells out. Then start the companies that supply it, so you keep the margin your suppliers made, and sell what is left to others.' },
+          { title: '3. Put spare money to work', body: 'Idle cash earns nothing. Buy dividend shares, buy stakes in private companies, bid at bankruptcy auctions, and win government tenders.' },
+          { title: '4. Spread out (level 5+)', body: 'Open the world: ship goods where they are short, buy where they are spare, and open trade offices in your best markets. Use R&D to patent cheaper ways to make things.' },
+          { title: '5. Take on the billionaires', body: 'Enter their industries with big, efficient plants, undercut them, and buy their weak companies. The Beat rivals page has the details.' },
+        ]}
+      />
+      <SectionTitle>Habits that win</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="📉" name="Watch your margin" effect="Profit ÷ sales. Above 10% is healthy for most goods; regulated care runs 5–8%." tip="If it falls, check prices, wages and input costs on the company's Overview." />
+        <Lever icon="💵" name="Never run dry" effect="A company below zero cash for about 45 days goes bankrupt." tip="Keep a buffer, and lower dividends before a big upgrade." />
+        <Lever icon="🔔" name="Listen to the assistant" effect="It warns about shortages on the way, price wars, cash trouble and chances abroad." tip="Each tip has a button that takes you straight to the fix." />
+        <Lever icon="🧭" name="Read the cycle" effect="Save cash in a boom. In a slump weak rivals go bankrupt and their plants are sold cheaply at auction." tip="The World tab shows where Astoria is in its cycle." />
+      </Card>
+      <Tip>A company that stays below zero cash goes bankrupt and is sold at auction. Spread your risk over several companies and industries.</Tip>
+    </>
+  );
+}
+
+function Economy() {
+  return (
+    <>
+      <Hero art={<IndustryThumb industry="finance" size={84} level={2} />} title="Everything is connected">
+        Every company buys from others and sells to others, so a change in one market travels down the supply chain.
+        Rivals think for themselves, and the government and the central bank react to the economy.
+      </Hero>
+      <SectionTitle>Between companies</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="🏷️" name="Price competition" effect="A rival with spare capacity and a fat margin cuts its price about 3% at a time to win buyers, especially when someone else is cheaper." tip="If rivals undercut you, compete on quality and brand, or cut costs with R&D before you match them." />
+        <Lever icon="🏗️" name="Rivals expand only when needed" effect="They build more capacity when they are sold out and the whole market is still short after the new plant opens." tip="A market that stays short and profitable is your chance too." />
+        <Lever icon="🚪" name="Newcomers" effect="When a market stays short and very profitable (margins above about 18%), a rich rival launches a new company there. A market with only one maker draws a challenger on a much lower margin, even if it needs a government permit." tip="High margins never last forever: get big before the newcomers arrive." />
+        <Lever icon="🤝" name="Mergers and the regulator" effect="Rich rivals buy out weaker companies in markets where they already sell. The regulator blocks any deal that would give one group more than 40% of a market, and that rule applies to you too." tip="A rival group that merges can set prices together; expect tougher competition in that market." />
+        <Lever icon="💰" name="What rivals do with money" effect="They pay down their companies' debts, buy shares and companies, and spend part of a big fortune on themselves." tip="A rival with lots of cash can outbid you at auctions; one with lots of debt is weak when rates rise." />
+      </Card>
+      <SectionTitle>Shocks travel down the chain</SectionTitle>
+      <Card className="p-4 text-sm leading-relaxed">
+        When a raw material or part jumps more than 12% in a month (a war abroad, a disaster at a mine, a plant closing),
+        the news reports it and names the goods that will cost more next. If one of your companies buys it, the assistant
+        warns you before your costs rise. Stock up in a warehouse, sign a supply deal at today's price, or raise your own
+        price a little.
+      </Card>
+      <SectionTitle>Workers by industry</SectionTitle>
+      <Card className="p-4 text-sm leading-relaxed">
+        Each industry has its own labour market. When an industry is short of workers or the whole country is near full
+        employment, its wages rise, most in skilled fields like tech and finance and least in retail. The Employees tab
+        on each company shows its industry's wage level against normal. Higher wages push that industry's prices up
+        over time.
+      </Card>
+      <SectionTitle>The home economy</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="📈" name="Growth and the cycle" effect="Astoria moves through booms and slowdowns. Shoppers spend more in a boom and less in a slump." tip="Regulated care barely changes; most other products follow shoppers' incomes." />
+        <Lever icon="🔥" name="Inflation" effect="Rising costs and rising prices feed each other. The central bank raises its rate when inflation runs above 2%." tip="A higher rate makes your loans dearer and stock prices lower." />
+        <Lever icon="👷" name="Jobs" effect="Unemployment falls when companies hire faster than usual and rises when they cut." tip="Low unemployment means higher wages for everyone." />
+      </Card>
+    </>
+  );
+}
+
+function World() {
+  return (
+    <>
+      <Hero art={<div className="text-6xl">🌍</div>} title="Eight countries, one world economy">
+        From level 5 the World tab opens the rest of the world. Until then you trade only at home.
+      </Hero>
+      <SectionTitle>Each country has its own economy</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="🔄" name="Booms and recessions" effect="Each country grows around its own normal rate (fast in emerging Bharatara, slow in Varnholm) in cycles, with the odd financial crisis." tip="A country in a boom pays more for what it buys: ship there. One in recession pays less." />
+        <Lever icon="🏛️" name="Interest rates" effect="Its central bank raises rates when the economy runs hot and cuts them in a slump." tip="Shown on each country's card on the map." />
+        <Lever icon="💱" name="Exchange rates" effect="Money flows to higher interest rates: when a country's rate rises above Astoria's, its currency climbs, so your goods sell there for more dollars." tip="War weakens a currency. A fall while your ship is at sea cuts what you get." />
+      </Card>
+      <SectionTitle>Trade with them</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="🚢" name="Export and import" effect="Ship goods from your warehouses to countries short of them, or bring home what they have spare." tip="Short goods sell for up to 40% more than at home, before tariff and shipping." />
+        <Lever icon="🏢" name="Trade office" effect="$1.5M to open, $40K a month. That country's tariff is halved, and ships sail 30% faster and 25% cheaper." tip="Open one in the country you trade with most. It slowly builds goodwill too." />
+        <Lever icon="🔁" name="Swaps" effect="A country offers its spare goods for what it lacks, worth 5–22% more, with no tariff." tip="New offers come each month." />
+      </Card>
+      <SectionTitle>Politics: deals, sanctions and wars</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="✍️" name="Free-trade deals" effect="Astoria signs them with friendly countries: no tariffs either way for two to four years." tip="Winners: makers of what that country lacks. Losers: makers of what it has spare, who face cheaper imports." />
+        <Lever icon="🚫" name="Sanctions" effect="Astoria stops all trade with a country it has fallen out with, or one that attacks an ally." tip="Winners: makers of what that country used to sell. Losers: exporters who sold there." />
+        <Lever icon="⚔️" name="Wars" effect="Countries at war pay more for food, steel, medicine and fuel, and stop trading with each other. If Astoria falls out badly with a country, trade stops and ships turn back." tip="A war between oil countries makes fuel dearer at home too." />
+      </Card>
+      <Tip>The world reaches home: world prices set what importers charge in Astoria, and foreign demand for Astoria's goods rises in a global boom and falls in wars and recessions.</Tip>
     </>
   );
 }
@@ -282,7 +403,7 @@ function Business() {
         <Lever icon="🏛" name="Own a bank" effect="Found a Banking company ($10M, mostly locked capital) and its loans to your other companies are cheaper (set the discount), and their interest becomes its income. Set its loan margin to win borrowers from rival banks." tip="A bank lends about 6x its capital. If a borrower goes bankrupt, it loses 60% of the loan." />
         <Lever icon="🤝" name="Partner stakes" effect="Sell up to 49% of a private company to investors. Their money goes into the company, with no interest to pay, and they get their share of dividends." tip="Buy them back later for their share of the value plus 10%." />
         <Lever icon="🎯" name="Takeovers" effect="Open any AI company's Owners tab to bid. Owners sell if you offer enough above the market price. Over 50% of the shares gives you control." tip="Hostile rivals want more or refuse. You can also sell your own companies to rivals for cash." />
-        <Lever icon="PA" name="Assistant" effect="The card on Home lists what needs you now, with a one-tap fix for each." tip="Check it whenever the Business tab shows a dot." />
+        <Lever icon="PA" name="Assistant" effect="The card on Home lists what needs you now, with a one-tap fix for each." tip="Check it whenever the Business tab shows a dot. Tap ✕ to clear a tip for two weeks; it comes back if it still applies." />
         <Lever icon="🗺" name="Planner" effect="Shows every product: price, demand vs supply, cost of each unit and a profit forecast for the price you pick." tip="Look for Shortage tags and a payback under a year." />
       </Card>
       <SectionTitle>Is my company healthy?</SectionTitle>

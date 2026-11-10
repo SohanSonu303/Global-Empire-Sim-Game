@@ -3,7 +3,7 @@ import { useGame } from '../../store/game';
 import { GOODS, INDUSTRIES, INDUSTRY_IDS, requiredCapital, startCost, usedBy } from '../../engine/data';
 import { inputSources, launchPreview, opportunities, type Opportunity } from '../../engine/advisor';
 import { hasLicence, licenceFee, licences, permitFee } from '../../engine/licences';
-import { CONSORTIUM_MIN, foundingPartners } from '../../engine/ownership';
+import { CONSORTIUM_MIN, MAX_OUTSIDE, agreedPartner, foundingPartners, judgePitch, type PartnerMood, type PitchAnswer } from '../../engine/ownership';
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import type { GoodId, IndustryId, WorldState } from '../../engine/types';
 import { GoodThumb } from '../art/plants';
@@ -20,6 +20,13 @@ const TAG: Record<Opportunity['tags'][number], { label: string; tone: 'good' | '
   cheap: { label: 'Cheap to start', tone: 'neutral' },
   yours: { label: 'You make this', tone: 'gold' },
   locked: { label: 'Licence needed', tone: 'warn' },
+};
+
+const MOOD: Record<PartnerMood, { label: string; tone: string }> = {
+  keen: { label: 'Keen', tone: 'text-green' },
+  warm: { label: 'Interested', tone: 'text-gold' },
+  cool: { label: 'Unsure', tone: 'text-amber' },
+  cold: { label: 'Not keen', tone: 'text-red' },
 };
 
 export function PlannerScreen({ good, industry }: { good?: GoodId; industry?: IndustryId }) {
@@ -163,15 +170,25 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
   const total = cost + permit;
   const [partnerId, setPartnerId] = useState<string | null>(null);
   const [partnerPct, setPartnerPct] = useState(0.25);
-  const canPartner = total >= CONSORTIUM_MIN;
-  const partners = canPartner ? foundingPartners(w, good, total, partnerPct) : [];
+  const [answer, setAnswer] = useState<PitchAnswer | null>(null);
+  const [allPartners, setAllPartners] = useState(false);
+  const partners = foundingPartners(w, good, total, partnerPct);
   const partner = partnerId ? partners.find((x) => x.id === partnerId) : undefined;
-  const theirs = partner?.ok ? Math.round(total * partnerPct) : 0;
+  const agreed = !!partner && agreedPartner(w, good, partner.id, partnerPct);
+  const theirs = agreed ? Math.round(total * partnerPct) : 0;
+  const pitch = async (pct: number) => {
+    if (!partner) return;
+    const a = judgePitch(w, good, total, partner.id, pct);
+    setPartnerPct(pct);
+    await dispatch({ type: 'pitchPartner', good, partnerId: partner.id, pct });
+    setAnswer(a);
+  };
+  const shownPartners = allPartners ? partners : partners.filter((x) => x.ok).slice(0, 5);
   const mine = total - theirs;
   const afford = w.player.cash >= mine;
   const suggested = suggestName(good, w);
   const submit = async () => {
-    const r = await dispatch({ type: 'foundCompany', name: name.trim() || suggested, good, priceMult: pm, ...(partner?.ok ? { partnerId: partner.id, partnerPct } : {}) });
+    const r = await dispatch({ type: 'foundCompany', name: name.trim() || suggested, good, priceMult: pm, ...(agreed && partner ? { partnerId: partner.id, partnerPct } : {}) });
     if (r.ok) onClose();
   };
   const bar = (v: number) => `${Math.max(2, (v / Math.max(p.price, p.unitCost)) * 100)}%`;
@@ -213,29 +230,46 @@ function PlanSheet({ good, w, onClose }: { good: GoodId; w: WorldState; onClose:
           Regulated: you can't charge more than the market price, and shortages don't push the price up. Margins are thin (about 5-8%), but people need care in good times and bad, so income is steady. Bigger plants earn better margins.
         </p>
       )}
-      {canPartner && fee === 0 && (
+      {fee === 0 && (
         <Section title="Bring in a partner">
-          <p className="text-xs text-muted">A partner pays part of the {fmtMoney(total)} bill and owns the same share of the company. They get that share of its dividends, and you keep control.</p>
+          <p className="text-xs text-muted">A partner pays part of the {fmtMoney(total)} bill and owns the same share of the company (at most {fmtPct(MAX_OUTSIDE, 0)}, so you always keep control). Make an offer: they say yes, ask for a different share, or say no. Keen partners want a bigger share; unsure ones put in less.{total < CONSORTIUM_MIN ? ' Small projects mostly interest partners who already know you.' : ''}</p>
           <div className="flex gap-1.5 flex-wrap mt-2">
-            <button className={cx('px-2.5 min-h-[36px] rounded-lg border text-xs font-semibold', !partnerId ? 'border-gold text-gold' : 'border-line text-muted')} onClick={() => setPartnerId(null)}>No partner</button>
-            {partners.map((x) => (
-              <button key={x.id} disabled={!x.ok && x.maxPct < partnerPct - 1e-9 ? false : !x.ok} className={cx('px-2.5 min-h-[36px] rounded-lg border text-xs font-semibold text-left disabled:opacity-40', partnerId === x.id ? 'border-gold text-gold' : 'border-line text-muted')} onClick={() => { setPartnerId(x.id); if (partnerPct > x.maxPct) setPartnerPct(x.maxPct); }}>
-                {x.name}<span className="block font-normal text-dim">{x.ok ? `${x.why} · up to ${fmtPct(x.maxPct, 0)}` : x.why}</span>
+            <button className={cx('px-2.5 min-h-[36px] rounded-lg border text-xs font-semibold', !partnerId ? 'border-gold text-gold' : 'border-line text-muted')} onClick={() => { setPartnerId(null); setAnswer(null); }}>No partner</button>
+            {shownPartners.map((x) => (
+              <button key={x.id} disabled={!x.ok && !x.why.startsWith('Takes at most')} className={cx('px-2.5 min-h-[36px] rounded-lg border text-xs font-semibold text-left disabled:opacity-40', partnerId === x.id ? 'border-gold text-gold' : 'border-line text-muted')}
+                onClick={() => { setPartnerId(x.id); setAnswer(null); if (partnerPct > x.maxPct) setPartnerPct(x.maxPct); }}>
+                {x.name}{x.mood && <span className={cx('ml-1 font-normal', MOOD[x.mood].tone)}>· {MOOD[x.mood].label}</span>}
+                <span className="block font-normal text-dim">{x.ok ? `${x.why} · up to ${fmtPct(x.maxPct, 0)}` : x.why}</span>
               </button>
             ))}
+            {partners.length > shownPartners.length && <button className="px-2.5 min-h-[36px] text-xs font-semibold text-gold" onClick={() => setAllPartners(true)}>Show all {partners.length}</button>}
           </div>
-          {partnerId && (
+          {partner && (
             <>
               <div className="flex items-center justify-between text-sm mt-2">
-                <span className="text-muted">Their share</span>
+                <span className="text-muted">Share you offer</span>
                 <span className="num font-bold">{fmtPct(partnerPct, 0)}</span>
               </div>
-              <input type="range" min={0.05} max={partner?.maxPct ?? 0.49} step={0.01} value={partnerPct} onChange={(e) => setPartnerPct(Number(e.target.value))} className="w-full h-tap accent-[var(--color-gold)]" aria-label="Partner share" />
+              <input type="range" min={0.05} max={partner.maxPct} step={0.01} value={partnerPct} onChange={(e) => { setPartnerPct(Number(e.target.value)); setAnswer(null); }} className="w-full h-tap accent-[var(--color-gold)]" aria-label="Partner share" />
               <div className="grid grid-cols-2 gap-2">
-                <Forecast label="They pay" value={fmtMoney(theirs)} />
-                <Forecast label="You pay" value={fmtMoney(mine)} tone={afford ? 'good' : 'bad'} />
+                <Forecast label="They pay" value={fmtMoney(Math.round(total * partnerPct))} />
+                <Forecast label="You pay" value={fmtMoney(total - Math.round(total * partnerPct))} />
               </div>
-              {partner && !partner.ok && <p className="text-xs text-red mt-1">{partner.name}: {partner.why}</p>}
+              {answer && (
+                <p className={cx('text-sm mt-2', answer.verdict === 'accept' ? 'text-green' : answer.verdict === 'counter' ? 'text-amber' : 'text-red')}>
+                  {answer.verdict === 'accept' ? '🤝 ' : answer.verdict === 'counter' ? '💬 ' : '✋ '}{answer.text}
+                </p>
+              )}
+              {agreed ? (
+                <p className="text-xs text-green mt-1">Deal agreed. Found the company below to seal it.</p>
+              ) : answer?.verdict === 'counter' ? (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <Button size="sm" onClick={() => pitch(answer.pct)}>Accept {fmtPct(answer.pct, 0)}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setAnswer(null)}>Change my offer</Button>
+                </div>
+              ) : answer?.verdict !== 'reject' && (
+                <Button size="sm" block className="mt-2" onClick={() => pitch(partnerPct)}>Offer {fmtPct(partnerPct, 0)} to {partner.name}</Button>
+              )}
             </>
           )}
         </Section>

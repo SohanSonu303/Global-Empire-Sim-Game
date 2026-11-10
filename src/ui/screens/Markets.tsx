@@ -9,6 +9,7 @@ import { Badge, BottomSheet, Button, Card, Chips, Progress, Screen, SectionTitle
 import { Delta, LineChart, Num } from '../components/game';
 import { IconBack } from '../components/Icons';
 import { stockChange } from '../helpers';
+import { TimesOnStock } from './MarketWatch';
 
 type T = 'stocks' | 'portfolio' | 'orders' | 'bonds';
 type IndFilter = 'all' | 'yours' | 'held' | IndustryId;
@@ -322,6 +323,7 @@ export function StockScreen({ ticker }: { ticker: string }) {
           <Metric label="Avg daily volume" value={`${(s.adv / 1e6).toFixed(2)}M`} />
           <Metric label="3-month change" value={<Delta v={stockChange(s.hist, 90)} />} />
         </div>
+        <TimesOnStock ticker={s.ticker} />
         <SectionTitle>Operating company</SectionTitle>
         <Card className="p-3" onClick={() => push({ screen: 'company', id: c.id })}>
           <div className="flex justify-between text-sm"><span className="text-muted">Net income 30d</span><span className="num font-semibold">{fmtMoney(c.sum30.netIncome)}</span></div>

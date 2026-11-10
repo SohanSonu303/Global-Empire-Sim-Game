@@ -90,9 +90,9 @@ describe('strategies', () => {
     expect(applyCommand(w, { type: 'startCampaign', companyId: c.id, size: 's', weeks: 2 }).ok).toBe(false); // one at a time
     w.play.tenders.push({ id: 'tt', buyer: 'Test', good: c.good, qtyPerMonth: 100, months: 3, closes: w.day + 1, ref: refPrice(w, c.good), status: 'open',
       bids: [{ companyId: 'x', name: 'Rival', price: refPrice(w, c.good) * 0.95, quality: 1 }] });
-    applyCommand(w, { type: 'bidTender', tenderId: 'tt', companyId: c.id, price: refPrice(w, c.good) * 0.7 });
-    run(w, 2);
-    expect(w.play.tenders.find((t) => t.id === 'tt')!.status).toBe('won');
+    expect(applyCommand(w, { type: 'tenderJoin', tenderId: 'tt', companyId: c.id }).ok).toBe(true);
+    expect(applyCommand(w, { type: 'tenderBid', tenderId: 'tt', price: refPrice(w, c.good) * 0.85 }).ok).toBe(true);
+    expect(w.play.tenders.find((t) => t.id === 'tt')!.status).toBe('won'); // the rival cannot go that low
     expect(w.play.jobs.some((j) => j.source === 'tender' && j.status === 'active')).toBe(true);
     applyCommand(w, { type: 'setPrice', companyId: c.id, priceMult: 0.8 });
     run(w, 2);
@@ -138,7 +138,10 @@ describe('strategies', () => {
       if (offer && co) applyCommand(w, { type: 'acceptJob', jobId: offer.id, companyId: co.id });
       for (const t of w.play.tenders) {
         const tc = w.companies.find((c) => c.isPlayer && c.good === t.good);
-        if (t.status === 'open' && !t.mine && tc) applyCommand(w, { type: 'bidTender', tenderId: t.id, companyId: tc.id, price: t.ref * 0.9 });
+        if (t.status === 'open' && !t.room && tc && applyCommand(w, { type: 'tenderJoin', tenderId: t.id, companyId: tc.id }).ok) {
+          applyCommand(w, { type: 'tenderBid', tenderId: t.id, price: t.ref * 0.9 });
+          if (t.status === 'open') applyCommand(w, { type: 'tenderPass', tenderId: t.id });
+        }
       }
       for (const e of [...w.pending]) resolveEvent(w, e.id, e.choices.at(-1)!.id);
     }

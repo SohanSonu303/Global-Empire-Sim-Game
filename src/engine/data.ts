@@ -22,9 +22,9 @@ const FIXED_SHARE = 0.21;
 /** A level-1 company's full-capacity daily revenue is foundCost / this. */
 const REVENUE_DAYS = 16;
 const PRODUCTIVITY_AT_START = 0.975; // productivity factor at morale 0.75
-/** Regulated goods (hospitals, wellness) run on thin, steady margins: about 10% before interest and tax at full capacity. */
-const REG_VAR_SHARE = 0.76;
-const REG_FIXED_SHARE = 0.14;
+/** Regulated goods (hospitals, wellness) run on thin, steady margins: about 14% before interest and tax at full capacity, much less with empty beds. */
+const REG_VAR_SHARE = 0.75;
+const REG_FIXED_SHARE = 0.11;
 /** Regulated goods can't be priced above the market price. */
 export const REG_PRICE_CAP = 1;
 

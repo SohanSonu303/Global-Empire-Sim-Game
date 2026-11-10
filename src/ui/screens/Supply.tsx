@@ -6,6 +6,9 @@ import { MAX_DAYS, MIN_DAYS, contractsOf, dailyNeed, dealPartners, judgeOffer, o
 import { fmtMoney, fmtPct, fmtPrice } from '../../engine/news';
 import type { Company, GoodId, WorldState } from '../../engine/types';
 import { Badge, BottomSheet, Button, Card, Chips, cx } from '../components/core';
+import { storable } from '../../engine/warehouse';
+import { unlocked } from '../../engine/rewards';
+import { StockPanel } from './Strategy';
 
 /** Materials, own-company pricing and supply deals for one company. */
 export function SupplyTab({ c, w }: { c: Company; w: WorldState }) {
@@ -18,8 +21,26 @@ export function SupplyTab({ c, w }: { c: Company; w: WorldState }) {
   const sisters = w.companies.filter((x) => x.isPlayer && !x.bankrupt && x.id !== c.id && GOODS[x.good].inputs.some((i) => i.good === c.good));
   const deals = contractsOf(w, c);
 
+  const holding = w.play.warehouses.filter((wh) => (wh.stock[c.good]?.qty ?? 0) > 0);
+  const showStore = mine && storable(c.good) && unlocked(w, 'warehouse');
   return (
     <div className="space-y-3">
+      {showStore && (
+        <Card className="p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-bold">🏬 In storage</div>
+            <button className="text-xs font-semibold text-gold min-h-8" onClick={() => push({ screen: 'strategy', tab: 'warehouses' })}>All warehouses →</button>
+          </div>
+          {!w.play.warehouses.length && <p className="text-sm text-muted mt-1">No warehouse yet. Build one to store {def.name.toLowerCase()} and sell when prices rise.</p>}
+          {w.play.warehouses.length > 0 && !holding.length && <p className="text-sm text-muted mt-1">No {def.name.toLowerCase()} stored. Set a Warehouse share in "Where your output goes" on the Overview tab.</p>}
+          {holding.map((wh) => (
+            <div key={wh.id}>
+              {w.play.warehouses.length > 1 && <div className="text-xs text-dim mt-2">{wh.name}</div>}
+              <StockPanel w={w} wh={wh} g={c.good} />
+            </div>
+          ))}
+        </Card>
+      )}
       <Card className="p-3">
         <div className="text-sm font-bold">Materials</div>
         {def.inputs.length === 0 && <p className="text-sm text-muted mt-1">{def.name} needs no materials: it is mined or grown. Your costs are staff and running costs.</p>}

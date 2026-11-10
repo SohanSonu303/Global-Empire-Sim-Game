@@ -4,12 +4,13 @@ import type { Speed } from '../../worker/protocol';
 import { fmtCompact, fmtMoney, fmtPct } from '../../engine/news';
 import type { Explanation } from '../../engine/types';
 import { netWorthExplain } from '../../engine/progress';
+import { unlockLevel } from '../../engine/rewards';
 import { xpForLevel } from '../../engine/data';
 import { useAttention } from '../advice';
 import { useGame, type Tab } from '../../store/game';
 import { BottomSheet, cx } from './core';
 import {
-  IconBriefcase, IconCalendar, IconCash, IconChart, IconDots, IconGlobe, IconHome, IconInfo, IconPause, IconPlay,
+  IconBriefcase, IconCalendar, IconCash, IconChart, IconDots, IconGlobe, IconHome, IconInfo, IconLock, IconPause, IconPlay,
 } from './Icons';
 
 /** A number the player can tap to see how it was computed. */
@@ -168,6 +169,7 @@ export function TabBar() {
   const setTab = useGame((s) => s.setTab);
   const pendingEvents = useGame((s) => s.world?.pending.length ?? 0);
   const attention = useAttention();
+  const worldLocked = useGame((s) => (s.world ? s.world.player.level < unlockLevel('world') : false));
   const flagged = Object.values(attention).some((v) => v === 'urgent' || v === 'warn');
   return (
     <nav className="sticky bottom-0 z-30 bg-surface/95 backdrop-blur border-t border-line pb-[env(safe-area-inset-bottom)]">
@@ -179,7 +181,7 @@ export function TabBar() {
             className={cx('relative flex flex-col items-center justify-center gap-0.5 h-14 text-xs font-semibold', tab === t.id ? 'text-gold' : 'text-muted')}
           >
             {tab === t.id && <span className="absolute top-0 inset-x-3 h-0.5 rounded-b bg-gold" />}
-            {t.icon}
+            {t.id === 'world' && worldLocked ? <IconLock /> : t.icon}
             {t.label}
             {t.id === 'home' && pendingEvents > 0 && <span className="absolute top-2 right-[30%] size-2 rounded-full bg-red" />}
             {t.id === 'business' && flagged && <span className="absolute top-2 right-[30%] size-2 rounded-full bg-amber" />}

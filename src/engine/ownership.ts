@@ -4,7 +4,10 @@
  *  - Takeovers: buy a company outright, or more than half of a listed company's shares.
  *  - Selling: rivals and a fund make offers for your private companies.
  */
-import { clamp, companyValue } from './company';
+import { clamp, companyValue, unitEconomics } from './company';
+import { netWorth } from './progress';
+import { foundPrice } from './traits';
+import { permitFee } from './licences';
 import { remember } from './contracts';
 import { stockByTicker } from './market';
 import { grantLicence, grantPermit } from './licences';
@@ -126,29 +129,137 @@ export const CONSORTIUM_MIN = 5_000_000;
 /** The fund backs big projects with up to this share. */
 const FUND_MAX = 0.3;
 
-export interface FoundingPartner { id: string; name: string; maxPct: number; ok: boolean; why: string }
+export interface FoundingPartner { id: string; name: string; maxPct: number; ok: boolean; why: string; mood?: PartnerMood }
+
+export type PartnerMood = 'keen' | 'warm' | 'cool' | 'cold';
+
+/** Pitches to one partner before they want a break */
+export const PITCH_ROUNDS = 3;
+/** A deal you agreed stays on the table this many days */
+const DEAL_DAYS = 30;
+
+/** How much a would-be partner likes this project (0..1), and why. */
+export function partnerInterest(w: WorldState, good: GoodId, total: number, partnerId: string): { interest: number; good: string[]; bad: string[] } {
+  const rv = rivalById(w, partnerId);
+  const pros: string[] = [];
+  const cons: string[] = [];
+  let v = 0.25;
+  // You: how big and how successful you are next to this project
+  const worth = netWorth(w);
+  const size = clamp(Math.log10(Math.max(1, worth) / Math.max(1, total)) / 1.2 + 0.5, 0, 1);
+  v += 0.25 * (size - 0.5);
+  if (size < 0.35) cons.push('you are small next to this project'); else if (size > 0.75) pros.push('you are well able to back it');
+  const mineCos = w.companies.filter((c) => c.isPlayer && !c.bankrupt);
+  const winners = mineCos.filter((c) => c.sum30.netIncome > 0).length;
+  if (mineCos.length) {
+    const rec = winners / mineCos.length;
+    v += 0.12 * (rec - 0.5);
+    if (rec >= 0.75 && winners >= 2) pros.push('your companies make money');
+    else if (rec < 0.5) cons.push('several of your companies lose money');
+  }
+  v += 0.08 * Math.min(1, w.player.level / 10);
+  // The market
+  const ue = unitEconomics(w, good);
+  const mk = w.goods[good];
+  if (ue.margin > 0.15) { v += 0.12; pros.push('margins are good'); } else if (ue.margin < 0.03) { v -= 0.15; cons.push('margins are thin'); }
+  if ((mk?.tightness ?? 1) > 1.05) { v += 0.08; pros.push('the market is short of supply'); }
+  if ((mk?.trend ?? 1) > 1.05) { v += 0.06; pros.push('demand is growing'); } else if ((mk?.trend ?? 1) < 0.92) { v -= 0.1; cons.push('demand is fading'); }
+  if (!rv) {
+    // The fund: steady, only big projects
+    if (total >= CONSORTIUM_MIN) { v += 0.15; pros.push('it likes big, steady projects'); } else { v -= 0.4; cons.push(`it only backs projects over ${fmtMoney(CONSORTIUM_MIN)}`); }
+    return { interest: clamp(v, 0, 1), good: pros, bad: cons };
+  }
+  // Them
+  const ind = GOODS[good].industry;
+  if (rv.focus.includes(ind)) { v += 0.12; pros.push(`they know ${INDUSTRIES[ind].name.toLowerCase()}`); }
+  else if (rv.tycoon) v += 0.06;
+  v += 0.2 * clamp(rv.relation / 100, -1, 1);
+  if (rv.relation > 30) pros.push('they like working with you'); else if (rv.relation < -5) cons.push('they do not trust you');
+  v += 0.1 * (rv.personality.risk - 0.5);
+  const own = w.companies.some((c) => c.ownerId === rv.id && c.good === good && !c.bankrupt);
+  if (own) { v -= 0.12; cons.push('you would compete with their own company'); }
+  return { interest: clamp(v, 0, 1), good: pros, bad: cons };
+}
+
+export function moodOf(interest: number): PartnerMood {
+  return interest >= 0.65 ? 'keen' : interest >= 0.48 ? 'warm' : interest >= 0.36 ? 'cool' : 'cold';
+}
+
+/** The stake a partner would like: keen ones want more of a good thing */
+export function wantedPct(interest: number, maxPct: number): number {
+  return clamp(Math.round((0.08 + 0.5 * interest) * 100) / 100, 0.05, maxPct);
+}
 
 /**
  * Who would pay part of the founding bill (plant + permit) for the same share of the company.
- * Rivals who know the industry, and tycoons, go up to 49%; others, and the fund, less.
+ * Rivals who know the industry, and tycoons, go up to 49%; others, and the fund, less. You
+ * always keep control: no partner may own more than 49%.
  */
 export function foundingPartners(w: WorldState, good: GoodId, total: number, pct = 0.25): FoundingPartner[] {
   const ind = GOODS[good].industry;
   const out: FoundingPartner[] = [];
   const big = total >= CONSORTIUM_MIN;
-  out.push({ id: FUND_ID, name: FUND_NAME, maxPct: FUND_MAX, ok: big && pct <= FUND_MAX + 1e-9, why: !big ? `Only for projects over ${fmtMoney(CONSORTIUM_MIN)}` : pct > FUND_MAX + 1e-9 ? `Takes at most ${fmtPct(FUND_MAX, 0)}` : 'Backs big projects for a steady share' });
+  out.push({ id: FUND_ID, name: FUND_NAME, maxPct: FUND_MAX, ok: big && pct <= FUND_MAX + 1e-9, why: !big ? `Only for projects over ${fmtMoney(CONSORTIUM_MIN)}` : pct > FUND_MAX + 1e-9 ? `Takes at most ${fmtPct(FUND_MAX, 0)}` : 'Backs big projects for a steady share', mood: big ? moodOf(partnerInterest(w, good, total, FUND_ID).interest) : undefined });
   for (const r of w.rivals) {
     const knows = r.focus.includes(ind) || !!r.tycoon;
     const maxPct = knows ? MAX_OUTSIDE : 0.3;
     const share = total * pct;
-    const why = !big ? `Only for projects over ${fmtMoney(CONSORTIUM_MIN)}`
-      : r.relation < -10 ? 'Will not work with you'
+    const why = r.relation < -10 ? 'Will not work with you'
       : pct > maxPct + 1e-9 ? `Takes at most ${fmtPct(maxPct, 0)}`
       : r.cash < share * 2 ? 'Cannot spare that much cash'
       : '';
-    out.push({ id: r.id, name: r.name, maxPct, ok: !why, why: why || (knows ? `Knows ${INDUSTRIES[ind].name.toLowerCase()}` : 'Wants a foot in the door') });
+    out.push({ id: r.id, name: r.name, maxPct, ok: !why, why: why || (knows ? `Knows ${INDUSTRIES[ind].name.toLowerCase()}` : 'Wants a foot in the door'), mood: why ? undefined : moodOf(partnerInterest(w, good, total, r.id).interest) });
   }
-  return out.sort((a, b) => Number(b.ok) - Number(a.ok) || b.maxPct - a.maxPct);
+  const rank = (x: FoundingPartner) => (x.mood === 'keen' ? 0 : x.mood === 'warm' ? 1 : x.mood === 'cool' ? 2 : 3);
+  return out.sort((a, b) => Number(b.ok) - Number(a.ok) || rank(a) - rank(b) || b.maxPct - a.maxPct);
+}
+
+export interface PitchAnswer { verdict: 'accept' | 'counter' | 'reject'; pct: number; text: string }
+
+/** What a partner says to an offer of `pct` of the new company for that share of the bill. Pure: no changes. */
+export function judgePitch(w: WorldState, good: GoodId, total: number, partnerId: string, pct: number): PitchAnswer {
+  const o = foundingPartners(w, good, total, pct).find((x) => x.id === partnerId);
+  const name = o?.name ?? 'They';
+  if (!o) return { verdict: 'reject', pct, text: 'Unknown partner' };
+  if (!o.ok && !o.why.startsWith('Takes at most')) return { verdict: 'reject', pct, text: `${name}: ${o.why.toLowerCase()}.` };
+  const talks = w.play.pitches?.[partnerId];
+  if (talks && w.day - talks.day < 30 && talks.count >= PITCH_ROUNDS && !(talks.good === good && Math.abs((talks.offer ?? -1) - pct) < 0.005)) {
+    return { verdict: 'reject', pct, text: `${name}: "We have talked enough about this for now. Come back next month."` };
+  }
+  const { interest, good: pros, bad: cons } = partnerInterest(w, good, total, partnerId);
+  if (interest < 0.36) {
+    return { verdict: 'reject', pct, text: `${name} says no${cons.length ? `: ${cons.slice(0, 2).join(' and ')}` : ''}.` };
+  }
+  const want = wantedPct(interest, o.maxPct);
+  const why = pros.length ? ` They like that ${pros.slice(0, 2).join(' and ')}.` : '';
+  if (Math.abs(pct - want) <= 0.03 + 1e-9) return { verdict: 'accept', pct, text: `${name} agrees: ${fmtPct(pct, 0)} for ${fmtMoney(total * pct)}.${why}` };
+  if (pct < want) return { verdict: 'counter', pct: want, text: `${name} wants a bigger share: ${fmtPct(want, 0)} for ${fmtMoney(total * want)}.${why}` };
+  return { verdict: 'counter', pct: want, text: `${name} will only put in ${fmtMoney(total * want)} for ${fmtPct(want, 0)}${cons.length ? `: ${cons[0]}` : ''}.` };
+}
+
+/** Make the pitch: talks are remembered, a no costs a little goodwill, a yes is kept on the table. */
+export function pitchPartner(w: WorldState, good: GoodId, partnerId: string, pct: number): CommandResult {
+  const total = foundTotal(w, good);
+  const a = judgePitch(w, good, total, partnerId, clamp(pct, 0.05, MAX_OUTSIDE));
+  const p = w.play;
+  const t = (p.pitches ??= {})[partnerId];
+  const fresh = !t || w.day - t.day >= 30 || t.good !== good;
+  p.pitches[partnerId] = { day: fresh ? w.day : t.day, count: (fresh ? 0 : t.count) + 1, good, offer: a.verdict === 'counter' ? a.pct : undefined };
+  const rv = rivalById(w, partnerId);
+  if (a.verdict === 'reject' && rv && fresh) rv.relation = Math.max(-100, rv.relation - 1);
+  if (a.verdict === 'accept') p.partnerDeal = { good, partnerId, pct: a.pct, day: w.day };
+  return { ok: a.verdict === 'accept', message: a.text };
+}
+
+/** The partner deal agreed for this product, if still on the table */
+export function agreedPartner(w: WorldState, good: GoodId, partnerId: string, pct: number): boolean {
+  const d = w.play.partnerDeal;
+  return !!d && d.good === good && d.partnerId === partnerId && Math.abs(d.pct - pct) < 0.005 && w.day - d.day <= DEAL_DAYS;
+}
+
+/** What founding this product costs you today: plant plus any permit */
+export function foundTotal(w: WorldState, good: GoodId): number {
+  return foundPrice(w, good) + permitFee(w, good);
 }
 
 /** Record a founding partner on a new company and take their money. */

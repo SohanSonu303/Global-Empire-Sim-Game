@@ -4,7 +4,9 @@
  */
 import { GOODS, GOOD_IDS, INDUSTRIES, LEVEL_CAP_MULT, fixedAt, maxPriceMult, startCost } from './data';
 import { licenceFee, permitFee } from './licences';
-import { MONOPOLY_SHARE, probeChance } from './strategy';
+import { unlocked } from './rewards';
+import { downstream } from './shocks';
+import { MONOPOLY_SHARE, probeChance, tenderLeader } from './strategy';
 import { foundPrice } from './traits';
 import { companyValue, creditLimit, damageMult, importPrice, nextUpgradeCost, productivity, refPrice, supplyCover, unitEconomics } from './company';
 import { effectMult } from './economy';
@@ -15,17 +17,27 @@ import { MANAGERS, clamp, maintCostPerDay, managerCostPerDay, reachOf } from './
 import { cycleOf } from './cycle';
 import { inbox, openCards } from './inbox';
 import { RECEIVABLE_DAYS } from './economy';
-import type { Command, Company, DayResult, GoodId, WorldState } from './types';
+import { managerStatus } from './manager';
+import { execSkill } from './execs';
+import { forecastCompany } from './budget';
+import { bestMarkets, nation } from './trade';
+import { fairFee, labWages, licenceOffers, patentsOf } from './research';
+import type { Command, Company, DayResult, GoodId, WorldState, CommandResult } from './types';
 
 export type Severity = 'urgent' | 'warn' | 'tip' | 'good';
 
 export type AdviceAction =
   | { type: 'command'; label: string; cmd: Command }
-  | { type: 'openCompany'; label: string; companyId: string }
+  | { type: 'openCompany'; label: string; companyId: string; tab?: string }
   | { type: 'openPlanner'; label: string; good?: GoodId }
   | { type: 'openEvent'; label: string }
   | { type: 'openInbox'; label: string }
-  | { type: 'openMarkets'; label: string };
+  | { type: 'openWarehouses'; label: string }
+  | { type: 'openContracts'; label: string }
+  | { type: 'openTender'; label: string; tenderId: string }
+  | { type: 'openMarkets'; label: string }
+  | { type: 'openCountry'; label: string; country: string }
+  | { type: 'openNews'; label: string };
 
 export interface Advice {
   id: string;
@@ -109,7 +121,7 @@ export function importedMuch(c: Company): boolean {
 
 /** Days for the next upgrade to pay for itself from extra profit (Infinity if it never does). */
 export function upgradePayback(w: WorldState, c: Company, price: number): number {
-  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs });
+  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
   const perUnit = price - (ue.materials + ue.labour + ue.other); // profit on each extra unit before overheads
   const demand = perDay(w, c, 'demand');
   const soldNow = Math.min(perDay(w, c, 'sold'), c.capacity);
@@ -141,7 +153,7 @@ export function recentSold(w: WorldState, c: Company): number {
 
 export function priceChangeGain(w: WorldState, c: Company, newMult: number): number {
   const def = GOODS[c.good];
-  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs });
+  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
   const market = refPrice(w, c.good);
   const sold = Math.min(recentSold(w, c), usableCap(w, c));
   const ratio = newMult / c.priceMult;
@@ -261,7 +273,7 @@ function adviseRaw(w: WorldState, c: Company): Advice[] {
   }
 
   // Pricing problems
-  const ue = unitEconomics(w, c.good, { level: c.level, util: 0.85, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs });
+  const ue = unitEconomics(w, c.good, { level: c.level, util: 0.85, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
   const market = refPrice(w, c.good);
   const price = market * c.priceMult;
   const settled = w.day - c.founded >= 7;
@@ -548,7 +560,7 @@ function sellDealIdea(w: WorldState, c: Company): Omit<Advice, 'companyId'> | nu
     && (e.target === c.good || GOODS[e.target].inputs.some((i) => i.good === c.good)) && -e.delta * weight(e.target) >= 0.08);
   if (spare < usableCap(w, c) * 0.12 && !slump) return null;
   const ref = refPrice(w, c.good);
-  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs });
+  const ue = unitEconomics(w, c.good, { level: c.level, salaryMult: c.salaryMult, morale: c.morale, inputs: c.inputs, player: c.isPlayer, maintenance: c.maintenance });
   const unitVar = ue.materials + ue.other;
   const buyers = dealPartners(w, c).buyers
     .filter((b) => (ownerRival(w, b)?.relation ?? 0) > -40)
@@ -654,7 +666,7 @@ export function computeAdvice(w: WorldState): Advice[] {
     out.push({ id: 'first', severity: 'tip', title: 'Start your first company', body: 'Open the planner to see which products are in demand and what they cost to make.', action: { type: 'openPlanner', label: 'Open planner' } });
   }
 
-  for (const c of mine) out.push(...adviseCompany(w, c));
+  for (const c of mine) out.push(...managed(w, c, adviseCompany(w, c)));
 
   // Vertical integration: supply your own companies
   const own = ownSupplyIdea(w, mine);
@@ -680,6 +692,129 @@ export function computeAdvice(w: WorldState): Advice[] {
   const needsCash = mine.some((c) => cashRisk(w, c) != null);
   if (mine.length > 0 && !needsCash && w.player.cash > cheapest * 1.5 && w.day > 30) {
     out.push({ id: 'idle', severity: 'tip', title: `${fmtMoney(w.player.cash)} is sitting idle`, body: 'Start another company or buy shares so your money works for you.', action: { type: 'openPlanner', label: 'Find a business' } });
+  }
+
+  // Tenders for products you make: the bidding war is worth your attention
+  for (const t of w.play.tenders) {
+    if (t.status !== 'open' || !mine.some((c) => c.good === t.good)) continue;
+    const left = Math.max(0, t.closes - w.day);
+    const total = t.qtyPerMonth * t.months;
+    const name = GOODS[t.good].name.toLowerCase();
+    const best = tenderLeader(t);
+    if (!t.room) {
+      out.push({
+        id: `tender-${t.id}`, severity: 'warn', title: `New tender: ${t.buyer} wants ${name}`,
+        body: `${t.qtyPerMonth.toLocaleString()} ${GOODS[t.good].unit} a month for ${t.months} months (${total.toLocaleString()} in all, about ${fmtMoney(total * t.ref)}). ${t.bids.length} rivals are bidding. Closes in ${left} day${left === 1 ? '' : 's'}.`,
+        action: { type: 'openTender', label: 'Go to tender', tenderId: t.id },
+      });
+    } else if (best && !best.player) {
+      out.push({
+        id: `tender-${t.id}`, severity: 'warn', title: `You are outbid on the ${t.buyer} tender`,
+        body: `${best.name} leads with ${fmtPrice(best.price)} per ${GOODS[t.good].unit}. Bidding closes in ${left} day${left === 1 ? '' : 's'}; if you do nothing, they win.`,
+        action: { type: 'openTender', label: 'Back to bidding', tenderId: t.id },
+      });
+    }
+  }
+
+  // A CFO looks ahead: cash that will run out within three months
+  if (execSkill(w, 'cfo') > 0) {
+    for (const c of mine) {
+      const f = forecastCompany(w, c);
+      const m = f.months.findIndex((x) => x.cash < 0);
+      if (m >= 0 && m < 3 && c.cash > 0) {
+        out.push({ id: `cfo-${c.id}`, companyId: c.id, severity: 'warn', title: `CFO: ${c.name} runs out of cash in about ${m + 1} month${m ? 's' : ''}`, body: `At today's sales and costs it loses about ${fmtMoney(-f.months[m].profit)} a month. Lower dividends, cut costs or raise prices now, before the bank has to step in.`, action: { type: 'openCompany', label: 'Open', companyId: c.id } });
+      }
+    }
+  }
+
+  // Fresh stock tips in the paper
+  const fresh = (w.play.calls ?? []).filter((k) => !k.broke && w.day - k.day < 7);
+  if (fresh.length) {
+    const k = fresh[fresh.length - 1];
+    const sc = w.play.callScore;
+    out.push({ id: `press-${k.id}`, severity: 'tip', title: `The Times tips ${k.ticker} to ${k.dir > 0 ? 'rise' : 'fall'}`,
+      body: `Read why in the newspaper's Market Watch, along with which industries are growing.${sc && sc.total >= 3 ? ` Its tips were right ${sc.right} of ${sc.total} times.` : ' About half of its tips come true.'}`,
+      action: { type: 'openNews', label: 'Read the paper' } });
+  }
+
+  // Supply chain shocks heading for your companies
+  for (const s of w.play.shocks ?? []) {
+    if (w.day - s.day > 30) continue;
+    const { first, second } = downstream(s.good);
+    for (const c of mine) {
+      const near = first.includes(c.good);
+      if (!near && !second.includes(c.good)) continue;
+      const via = near ? '' : ` (through ${GOODS[c.good].inputs.map((i) => i.good).filter((x) => first.includes(x)).map((x) => GOODS[x].name.toLowerCase()).join(', ')})`;
+      // A warning only when a direct input jumps and margins are thin; otherwise a tip
+      const thin = c.sum30.revenue <= 0 || c.sum30.netIncome / c.sum30.revenue < 0.08;
+      out.push({ id: `shock-${s.good}-${c.id}`, companyId: c.id, severity: near && thin ? 'warn' : 'tip', title: `${GOODS[s.good].name} is up ${Math.round(s.rise * 100)}%: ${c.name}'s costs follow`,
+        body: `${near ? 'It is one of your inputs, so costs rise within 2–4 weeks' : `It reaches you${via} in about 4–8 weeks`}. Stock up inputs now, sign a supply deal at today's price, or raise your price a little before rivals do.`,
+        action: { type: 'openCompany', label: 'Supply & deals', companyId: c.id, tab: 'supply' } });
+    }
+  }
+
+  // R&D: an idle lab, rival patents you could license, rivals who would pay for yours
+  for (const c of mine) {
+    if (c.lab?.staff.length && !c.lab.project) {
+      out.push({ id: `lab-${c.id}`, companyId: c.id, severity: 'warn', title: `${c.name}'s lab has nothing to work on`, body: `You pay ${c.lab.staff.length} researcher${c.lab.staff.length > 1 ? 's' : ''} ${fmtMoney(labWages(c))} a day. Start a project: cheaper production, better quality or a premium version.`, action: { type: 'openCompany', label: 'Open R&D', companyId: c.id, tab: 'research' } });
+    }
+  }
+  const lic = licenceOffers(w).filter((o) => o.company.last.sold * (o.value - o.fee) > 500).sort((a, b) => b.company.last.sold * (b.value - b.fee) - a.company.last.sold * (a.value - a.fee))[0];
+  if (lic) {
+    const holder = w.companies.find((x) => x.id === lic.patent.holderId);
+    out.push({ id: `lic-${lic.patent.id}-${lic.company.id}`, companyId: lic.company.id, severity: 'tip', title: `License ${holder?.name ?? 'a rival'}'s ${lic.patent.name}?`,
+      body: `It is worth about ${fmtMoney(lic.value)} a unit to ${lic.company.name}, and they ask ${fmtMoney(lic.fee)} a unit: about ${fmtMoney(lic.company.last.sold * (lic.value - lic.fee) * 30)} a month better off at today's sales.`,
+      action: { type: 'command', label: `License for ${fmtMoney(lic.fee)}/unit`, cmd: { type: 'acceptLicence', patentId: lic.patent.id, companyId: lic.company.id } } });
+  }
+  for (const p of patentsOf(w)) {
+    if (!p.isPlayer) continue;
+    const buyers = w.companies.filter((x) => !x.isPlayer && !x.bankrupt && x.good === p.good && !p.licences.some((l) => l.companyId === x.id));
+    const best = buyers.sort((a, b) => b.last.sold - a.last.sold)[0];
+    if (best && best.last.sold > 0) {
+      const fee = fairFee(w, p, best);
+      out.push({ id: `sellic-${p.id}`, companyId: p.holderId, severity: 'tip', title: `${best.name} would pay to use your ${p.name}`,
+        body: `About ${fmtMoney(fee)} a unit, or ${fmtMoney(fee * best.last.sold * 30)} a month at its sales. It also gets your edge, so license when the fee is worth more than the lead.`,
+        action: { type: 'openCompany', label: 'Open R&D', companyId: p.holderId, tab: 'research' } });
+    }
+  }
+
+  // Stored goods that sell far better abroad
+  if (w.play.trade && w.play.warehouses.length && unlocked(w, 'world')) {
+    const best = bestMarkets(w).find((b) => b.gain > 0.2 && b.qty * b.home > 50_000);
+    if (best) {
+      out.push({ id: `export-${best.good}`, severity: 'tip', title: `${nation(best.nation).short} pays ${Math.round(best.gain * 100)}% more for your ${GOODS[best.good].name.toLowerCase()}`,
+        body: `After tariff and shipping you would get about ${fmtMoney(best.perUnit)} a ${GOODS[best.good].unit} there, against ${fmtMoney(best.home)} at home, for the ${Math.round(best.qty).toLocaleString()} in your warehouses. Prices can move while the ship is at sea.`,
+        action: { type: 'openCountry', label: `Trade with ${nation(best.nation).short}`, country: best.nation } });
+    }
+  }
+
+  // Replies to requests you posted
+  for (const rq of w.play.requests ?? []) {
+    if (rq.status !== 'open' || !rq.replies.length) continue;
+    const best = rq.replies[0];
+    out.push({
+      id: `request-${rq.id}`, severity: 'good', title: `${rq.replies.length} offer${rq.replies.length === 1 ? '' : 's'} for your ${GOODS[rq.good].name.toLowerCase()} ${rq.side === 'buy' ? 'request' : 'sale'}`,
+      body: `Best: ${best.name}, ${best.qtyPerDay.toLocaleString()} ${GOODS[rq.good].unit} a day at ${fmtPrice(best.price)} for ${rq.days} days. Offers lapse on day ${rq.closes}.`,
+      action: { type: 'openContracts', label: 'See offers' },
+    });
+  }
+
+  // Stored goods worth selling now
+  for (const g of GOOD_IDS) {
+    let qty = 0;
+    let paid = 0;
+    for (const wh of w.play.warehouses) { const st = wh.stock[g]; if (st && st.qty > 0) { qty += st.qty; paid += st.qty * st.cost; } }
+    if (qty <= 0) continue;
+    const now = refPrice(w, g);
+    const cost = paid / qty;
+    const gain = qty * (now - cost);
+    if (now > cost * 1.15 && gain > 20_000) {
+      out.push({
+        id: `sell-${g}`, severity: 'good', title: `Good time to sell stored ${GOODS[g].name.toLowerCase()}`,
+        body: `${GOODS[g].name} sells for ${fmtPrice(now)}, ${fmtPct(now / cost - 1, 0)} more than you paid. Selling your ${Math.round(qty).toLocaleString()} ${GOODS[g].unit} now makes about ${fmtMoney(gain)}.`,
+        action: { type: 'openWarehouses', label: 'Warehouses' },
+      });
+    }
   }
 
   // The monthly inbox
@@ -718,7 +853,61 @@ export function computeAdvice(w: WorldState): Advice[] {
   }
 
   out.sort((a, b) => RANK[a.severity] - RANK[b.severity]);
-  return out;
+  const cleared = w.play.cleared ?? {};
+  return out.filter((a) => !((cleared[a.id] ?? 0) > w.day));
+}
+
+/** Tips a Top manager handles itself, so they fold into its report */
+const HANDLED = ['customers-', 'adwaste-', 'machines-', 'owed-', 'quality-', 'trim-', 'raise-', 'overpriced-', 'stock-', 'supply-'];
+
+/**
+ * A company with a hired manager reports once a week instead of sending many tips.
+ * Urgent problems still come straight to you; a Top manager's recommendations
+ * (upgrades, deals) arrive in its report with an Approve button.
+ */
+function managed(w: WorldState, c: Company, tips: Advice[]): Advice[] {
+  const m = c.manager ?? 'none';
+  if (m === 'none') return tips;
+  const log = c.mgrLog;
+  const label = MANAGERS[m].label;
+  const handled = (a: Advice) => m === 'pro' && HANDLED.some((h) => a.id.startsWith(h));
+  const loud = tips.filter((a) => a.severity === 'urgent' || (a.severity === 'warn' && !handled(a)));
+  const rest = tips.filter((a) => !loud.includes(a));
+  const ideas = m === 'pro' ? rest.filter((a) => !handled(a) && a.action?.type === 'command') : [];
+  const notes = m === 'pro' ? rest.filter((a) => !handled(a) && !ideas.includes(a)) : rest;
+  const did = log?.did ?? [];
+  const parts = [
+    !log ? 'Starts its first weekly round in a few days.' : did.length ? `This week: ${did.join('; ')}.` : 'This week: no changes needed.',
+    `${managerStatus(w, c)}.`,
+    ideas.length ? `Recommends: ${ideas.map((a) => a.title.replace(/\.$/, '')).join('; ')}.` : '',
+  ].filter(Boolean);
+  const pick = ideas[0];
+  const report: Advice = {
+    id: `mgr-${c.id}`, companyId: c.id, severity: ideas.length ? 'good' : 'tip',
+    title: `${label} report: ${c.name}`,
+    body: parts.join(' '),
+    action: pick?.action && pick.action.type === 'command' ? { ...pick.action, label: `Approve: ${pick.action.label}` } : { type: 'openCompany', label: 'Open', companyId: c.id },
+  };
+  return [...loud, report, ...notes];
+}
+
+/** Cleared tips stay hidden this many game days; urgent ones come back sooner. */
+export const CLEAR_DAYS = 14;
+export const CLEAR_DAYS_URGENT = 3;
+
+/** Hide these assistant tips for a while. If the problem is still there afterwards, the tip comes back. */
+export function clearTips(w: WorldState, ids: string[]): CommandResult {
+  const live = computeAdvice(w);
+  const cleared = (w.play.cleared ??= {});
+  for (const k of Object.keys(cleared)) if (cleared[k] <= w.day) delete cleared[k];
+  let n = 0;
+  for (const id of ids) {
+    const a = live.find((x) => x.id === id);
+    if (!a || a.id === 'event') continue; // a waiting decision cannot be hidden
+    cleared[id] = w.day + (a.severity === 'urgent' ? CLEAR_DAYS_URGENT : CLEAR_DAYS);
+    n++;
+  }
+  return n ? { ok: true, message: n === 1 ? 'Cleared. It comes back if it still applies in two weeks.' : `Cleared ${n} tips.` } : { ok: false, message: 'Nothing to clear' };
 }
 
 /** Highest severity per company, for red dots on cards and the Business tab. */
@@ -750,6 +939,15 @@ export interface Opportunity {
   reason: string;
 }
 
+/**
+ * How full a new level-1 company runs at the market price. In open markets a newcomer wins buyers from
+ * rivals and fills up unless the market is badly oversupplied. In regulated care the price is fixed,
+ * so patients are shared out and a newcomer in a crowded market keeps empty beds.
+ */
+export function newcomerFill(good: GoodId, gap: number): number {
+  return GOODS[good].reg ? clamp(0.8 + gap * 1.2, 0.25, 1) : clamp(1 + (gap + 0.15) * 1.2, 0.3, 1);
+}
+
 /** Planner data for every good: is it worth entering, and why. */
 export function opportunities(w: WorldState): Opportunity[] {
   return GOOD_IDS.map((g) => {
@@ -764,16 +962,17 @@ export function opportunities(w: WorldState): Opportunity[] {
     const priceChange = mk.idx - 1;
     const past = mk.hist.length > 15 ? mk.hist[mk.hist.length - 16].price : price;
     const trend = past > 0 ? price / past - 1 : 0;
-    const ue = unitEconomics(w, g, { level: 1, util: 0.8 });
-    const margin = ue.margin;
-    const profitDay = (price - ue.total) * ue.capacity * 0.8 * 0.75; // after marketing/R&D/tax, roughly
-    const paybackDays = profitDay > 0 ? startCost(g) / profitDay : Infinity;
     const gap = capacity > 0 ? demand / capacity - 1 : 1;
+    const fill = newcomerFill(g, gap);
+    const ue = unitEconomics(w, g, { level: 1, util: fill, player: true, newcomer: true });
+    const margin = ue.margin;
+    const profitDay = (price - ue.total) * ue.capacity * fill * 0.75; // after marketing/R&D/tax, roughly
+    const paybackDays = profitDay > 0 ? startCost(g) / profitDay : Infinity;
     const tags: Opportunity['tags'] = [];
     if (w.companies.some((c) => c.isPlayer && !c.bankrupt && c.good === g)) tags.push('yours');
     if (mk.imported > demand * 0.05 || gap > 0) tags.push('shortage');
     if (trend > 0.06 || w.effects.some((e) => e.kind === 'goodDemand' && e.target === g && e.delta > 0)) tags.push('hot');
-    if (gap < -0.25 && sellers.length >= 2) tags.push('crowded');
+    if ((gap < -0.25 || (GOODS[g].reg && gap < -0.08)) && sellers.length >= 2) tags.push('crowded');
     if (startCost(g) <= 250_000) tags.push('cheap');
     const licence = licenceFee(w, GOODS[g].industry);
     if (licence > 0) tags.push('locked');
@@ -782,7 +981,9 @@ export function opportunities(w: WorldState): Opportunity[] {
       : tags.includes('hot')
         ? 'Demand is rising.'
         : tags.includes('crowded')
-          ? 'There is a lot of spare capacity, so prices are under pressure.'
+          ? GOODS[g].reg
+            ? `Prices are fixed and there are more beds than patients: a newcomer fills only about ${Math.round(fill * 100)}%.`
+            : 'There is a lot of spare capacity, so prices are under pressure.'
           : 'A steady market.';
     return { good: g, price, priceChange, trend, demand, capacity, gap, producers: sellers.length, unitCost: ue.total, margin, foundCost: foundPrice(w, g), licence, paybackDays, tags, reason };
   }).sort((a, b) => score(b) - score(a));
@@ -829,9 +1030,9 @@ export function launchPreview(w: WorldState, good: GoodId, priceMult: number): L
   const def = GOODS[good];
   const op = opportunities(w).find((o) => o.good === good)!;
   // Base fill for a newcomer at market price: full when the market is short, less when crowded.
-  const base = Math.max(0.25, Math.min(1, 0.8 + op.gap * 1.2));
+  const base = newcomerFill(good, op.gap);
   const util = Math.max(0.05, Math.min(1, base * Math.pow(priceMult, -def.switchElasticity)));
-  const ue = unitEconomics(w, good, { level: 1, util });
+  const ue = unitEconomics(w, good, { level: 1, util, player: true, newcomer: true });
   const src = inputSources(w, good);
   const materials = src.reduce((s, i) => s + i.qty * Math.min(i.market, i.own?.price ?? Infinity), 0);
   const unitCost = ue.total - ue.materials + materials;

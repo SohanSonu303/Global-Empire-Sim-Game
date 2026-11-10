@@ -9,6 +9,12 @@ import { addNews, fmtMoney, fmtPct } from './news';
 import { addXp, netWorth, updateProgress } from './progress';
 import { dailyRewards, monthlyReport } from './rewards';
 import { dailyStrategies } from './strategy';
+import { dailyRequests } from './requests';
+import { dailyBudget } from './budget';
+import { dailyExecs, monthlyExecs } from './execs';
+import { dailyTrade, monthlyTrade } from './trade';
+import { weeklyShocks } from './shocks';
+import { dailyResearch, monthlyResearch } from './research';
 import { monthlyTraits, syncTraitPerks } from './traits';
 import { dailyWarehouses, rivalStockpiles } from './warehouse';
 import { computeAdvice } from './advisor';
@@ -18,8 +24,11 @@ import { checkControl } from './ownership';
 import { dailyDisasters } from './disasters';
 import { dailyResources } from './resources';
 import { dailyAuctions, failCompany, monthlyExits } from './auctions';
-import { monthlyTycoons } from './tycoons';
-import { dailyBusiness, weeklyManagers } from './business';
+import { marketEntry, monthlyTycoons } from './tycoons';
+import { monthlyMergers } from './mergers';
+import { monthlyPress, weeklyPress } from './press';
+import { dailyBusiness } from './business';
+import { weeklyManagers } from './manager';
 import { dailyInbox, monthlyInbox } from './inbox';
 import { weeklyRivalry } from './rivalry';
 import { monthlyCycle } from './cycle';
@@ -54,12 +63,19 @@ export function step(w: WorldState): void {
     rivalRelations(w);
     weeklyRivalry(w);
     weeklyManagers(w);
+    weeklyShocks(w);
+    weeklyPress(w);
   }
 
   dailyResources(w);
   dailyAuctions(w);
   dailyWarehouses(w);
   dailyStrategies(w);
+  dailyRequests(w);
+  dailyBudget(w);
+  dailyExecs(w);
+  dailyTrade(w);
+  dailyResearch(w);
   dailyInbox(w);
 
   updatePrices(w);
@@ -69,9 +85,15 @@ export function step(w: WorldState): void {
   if (day % 30 === 0) {
     rivalStockpiles(w, () => next(w.rng));
     monthlyTycoons(w);
+    marketEntry(w);
+    monthlyMergers(w);
     monthlyExits(w);
     monthlyCycle(w);
+    monthlyPress(w);
     monthlyInbox(w);
+    monthlyExecs(w);
+    monthlyTrade(w);
+    monthlyResearch(w);
     rebalanceLoans(w);
     creditEvents(w);
     const { prevRate, prevInflation, prevUnemployment } = monthlyMacro(w);

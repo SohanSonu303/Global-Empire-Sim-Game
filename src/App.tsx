@@ -13,15 +13,19 @@ import { WorldScreen } from './ui/screens/World';
 import {
   AchievementsScreen, GovernmentScreen, MoreScreen, ReportsScreen, RivalScreen, RivalsScreen, SavesScreen, StatsScreen,
 } from './ui/screens/More';
-import { EventSheet } from './ui/screens/Overlays';
+import { EventSheet, TenderWatch } from './ui/screens/Overlays';
 import { RewardOverlays } from './ui/screens/Rewards';
 import { TitleScreen } from './ui/screens/Title';
 import { StrategyScreen } from './ui/screens/Strategy';
 import { InboxScreen } from './ui/screens/Inbox';
+import { TenderRoom } from './ui/screens/Tender';
+import { BudgetScreen } from './ui/screens/Budget';
+import { ExecsScreen } from './ui/screens/Execs';
+import { CountryScreen } from './ui/screens/Country';
 
 function RouteView({ r }: { r: Route }) {
   switch (r.screen) {
-    case 'company': return <CompanyScreen id={r.id} />;
+    case 'company': return <CompanyScreen id={r.id} tab={r.tab} />;
     case 'stock': return <StockScreen ticker={r.ticker} />;
     case 'rival': return <RivalScreen id={r.id} />;
     case 'news': return <NewsScreen />;
@@ -37,6 +41,10 @@ function RouteView({ r }: { r: Route }) {
     case 'strategy': return <StrategyScreen tab={r.tab} />;
     case 'reports': return <ReportsScreen />;
     case 'inbox': return <InboxScreen />;
+    case 'tender': return <TenderRoom id={r.id} />;
+    case 'budget': return <BudgetScreen />;
+    case 'execs': return <ExecsScreen />;
+    case 'country': return <CountryScreen id={r.id} />;
   }
 }
 
@@ -80,6 +88,7 @@ export default function App() {
             <TimeBar />
             <TabBar />
             <EventSheet />
+            <TenderWatch />
             <RewardOverlays />
             <ExplainSheet />
           </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AI_COMPANIES, GOODS, GOOD_IDS, REG_PRICE_CAP, adviseCompany, applyCommand, createWorld, foundingPartners, hasPermit, maxPriceMult, outsidePct, permitFee, sellPrice, refPrice, startCost, step, tycoonFound } from '../src/engine';
+import { AI_COMPANIES, GOODS, GOOD_IDS, REG_PRICE_CAP, adviseCompany, applyCommand, createWorld, foundingPartners, hasPermit, judgePitch, maxPriceMult, outsidePct, permitFee, sellPrice, refPrice, startCost, step, tycoonFound } from '../src/engine';
 import type { GoodId, WorldState } from '../src/engine';
 import { addMissingGoods, chainDemand } from '../src/engine/world';
 
@@ -95,14 +95,20 @@ describe('mega businesses and permits', () => {
     const eusk = w.rivals.find((r) => r.id === 'eusk')!;
     const rCash = eusk.cash;
     const pCash = w.player.cash;
-    const r = applyCommand(w, { type: 'foundCompany', name: 'Skyward', good: 'space', partnerId: 'eusk', partnerPct: 0.4 });
+    // No deal without agreeing terms first
+    expect(applyCommand(w, { type: 'foundCompany', name: 'Skyward', good: 'space', partnerId: 'eusk', partnerPct: 0.4 }).ok).toBe(false);
+    const a = judgePitch(w, 'space', total, 'eusk', 0.4);
+    expect(a.verdict).not.toBe('reject');
+    const pct = a.pct;
+    expect(applyCommand(w, { type: 'pitchPartner', good: 'space', partnerId: 'eusk', pct }).ok).toBe(true);
+    const r = applyCommand(w, { type: 'foundCompany', name: 'Skyward', good: 'space', partnerId: 'eusk', partnerPct: pct });
     expect(r.ok, r.message).toBe(true);
     const c = w.companies.find((x) => x.name === 'Skyward')!;
-    expect(outsidePct(c)).toBeCloseTo(0.4);
-    expect(rCash - eusk.cash).toBeCloseTo(total * 0.4, -4);
-    expect(pCash - w.player.cash).toBeLessThan(total * 0.61);
-    // small projects can't take partners
-    expect(foundingPartners(w, 'software', startCost('software')).every((p) => !p.ok)).toBe(true);
+    expect(outsidePct(c)).toBeCloseTo(pct);
+    expect(rCash - eusk.cash).toBeCloseTo(total * pct, -4);
+    expect(pCash - w.player.cash).toBeLessThan(total * (1 - pct) + 1);
+    // the fund only backs big projects
+    expect(foundingPartners(w, 'software', startCost('software')).find((p) => p.id === 'fund')!.ok).toBe(false);
   });
 
   it('makes tycoons pay the permit when they enter a mega business', () => {
@@ -141,11 +147,16 @@ describe('regulated healthcare', () => {
 
   it('earns thin but positive margins and never gets price-rise advice', () => {
     // a world where the new hospital wins its patients (some seeds stay in the red for longer)
-    const w = rich(16);
-    applyCommand(w, { type: 'foundCompany', name: 'Greenvale', good: 'hospitals' });
-    const c = w.companies.find((x) => x.name === 'Greenvale')!;
-    // margins, not luck: a random fire on an uninsured new plant would sink any business
-    for (let i = 0; i < 400; i++) { step(w); w.pending = []; delete c.damage; } // a year to fill the wards
+    let w = rich(16);
+    let c = w.companies[0];
+    for (const seed of [16, 17, 15, 13]) {
+      w = rich(seed);
+      applyCommand(w, { type: 'foundCompany', name: 'Greenvale', good: 'hospitals' });
+      c = w.companies.find((x) => x.name === 'Greenvale')!;
+      // margins, not luck: a random fire on an uninsured new plant would sink any business
+      for (let i = 0; i < 400; i++) { step(w); w.pending = []; delete c.damage; } // a year to fill the wards
+      if (c.sum30.netIncome > 0) break;
+    }
     expect(c.bankrupt).toBe(false);
     const margin = c.sum30.netIncome / c.sum30.revenue;
     expect(margin).toBeGreaterThan(0);

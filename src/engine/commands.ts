@@ -6,18 +6,24 @@ import { applyUpgrade, clamp, drawCredit, nextUpgradeCost, salaryOf, wageIndex, 
 import { cancelContract, offerContract } from './contracts';
 import { resolveEvent } from './events';
 import { MAX_RATE_MULT, MIN_RATE_MULT, ensureBanks, isBank, willLend } from './banks';
-import { addFoundingPartner, bidCompany, buyBackStake, buyStake, foundingPartners, outsidePct, sellCompany, sellStake } from './ownership';
+import { addFoundingPartner, agreedPartner, bidCompany, buyBackStake, buyStake, foundingPartners, outsidePct, pitchPartner, sellCompany, sellStake } from './ownership';
 import { maxFillToday, stockByTicker, tryFill } from './market';
 import { addNews, fmtMoney } from './news';
 import { addXp, claimGoal, netWorth } from './progress';
 import { checkIn } from './rewards';
-import { acceptJob, bidTender, endWar, startCampaign } from './strategy';
+import { acceptJob, bidInTender, endWar, joinTender, passTender, startCampaign } from './strategy';
 import { buildWarehouse, releaseStock, setBuyOrder, setLimit, setSellRule, setSplit as setSplitCmd, sellToRivals, sendStock, upgradeWarehouse } from './warehouse';
 import { newCompany, seedInputs } from './world';
 import { COVER, premiumPerDay } from './disasters';
 import { explore } from './resources';
 import { bidAuction } from './auctions';
 import { answerInbox } from './inbox';
+import { clearTips } from './advisor';
+import { acceptReply, cancelRequest, postRequest } from './requests';
+import { saveBudget } from './budget';
+import { fireExec, hireExec, raiseExec } from './execs';
+import { acceptBarter, closeOffice, exportGoods, importGoods, openOffice } from './trade';
+import { acceptLicence, fireResearcher, hireResearcher, offerLicence, startProject, stopProject } from './research';
 import { rivalNotices } from './rivalry';
 import { MAINT, MANAGERS, NEW_REACH, NEW_SKILL } from './company';
 import type { Command, CommandResult, Company, Order, WorldState } from './types';
@@ -50,6 +56,7 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
         const o = foundingPartners(w, cmd.good, total, pct).find((x) => x.id === cmd.partnerId);
         if (!o) return fail('Unknown partner');
         if (!o.ok) return fail(`${o.name}: ${o.why}`);
+        if (!agreedPartner(w, cmd.good, o.id, pct)) return fail(`Agree the terms with ${o.name} first: make them an offer`);
         partner = { id: o.id, pct, paid: Math.round(total * pct) };
       }
       const mine = total - (partner?.paid ?? 0);
@@ -70,7 +77,7 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       if (capital > 0) { c.cash += capital; c.lockedCapital = capital; }
       seedInputs(w, c, 2); // a starter delivery of inputs comes with the plant
       if (cmd.priceMult) c.priceMult = Math.max(0.5, Math.min(maxPriceMult(cmd.good), cmd.priceMult));
-      if (partner) addFoundingPartner(w, c, partner.id, partner.pct, partner.paid);
+      if (partner) { addFoundingPartner(w, c, partner.id, partner.pct, partner.paid); delete w.play.partnerDeal; }
       // A new business starts with few customers and a green team
       c.reach = def.reg ? 0.9 : NEW_REACH; // people who need care go where the beds are
       c.satisfaction = 0.75;
@@ -117,7 +124,7 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       if (!c) return fail('Company not found');
       const n = Math.round(cmd.count);
       if (n > 0) {
-        const cost = n * salaryOf(c) * 5 * wageIndex(w);
+        const cost = n * salaryOf(c) * 5 * wageIndex(w, c.industry);
         if (c.cash < cost) return fail(`Hiring costs ${fmtMoney(cost)} of company cash`);
         c.cash -= cost;
         hireStaff(c, n);
@@ -133,7 +140,7 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
     case 'setPrice': {
       const c = myCompany(w, cmd.companyId);
       if (!c) return fail('Company not found');
-      c.priceMult = clamp(cmd.priceMult, 0.5, maxPriceMult(c.good));
+      c.priceMult = clamp(cmd.priceMult, 0.5, maxPriceMult(c.good) + (c.labFx?.price ?? 0));
       c.priceSetDay = w.day;
       return ok(GOODS[c.good].reg && cmd.priceMult > c.priceMult ? 'Regulated: you cannot charge more than the market price' : 'Price updated');
     }
@@ -318,8 +325,12 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       return setSellRule(w, cmd.id, cmd.good, cmd.above, cmd.shortage);
     case 'sellToRivals':
       return sellToRivals(w, cmd.id, cmd.good, cmd.qty);
-    case 'bidTender':
-      return bidTender(w, cmd.tenderId, cmd.companyId, cmd.price);
+    case 'tenderJoin':
+      return joinTender(w, cmd.tenderId, cmd.companyId);
+    case 'tenderBid':
+      return bidInTender(w, cmd.tenderId, cmd.price);
+    case 'tenderPass':
+      return passTender(w, cmd.tenderId);
     case 'endWar':
       return endWar(w, cmd.warId);
     case 'setInsurance': {
@@ -337,6 +348,49 @@ export function applyCommand(w: WorldState, cmd: Command): CommandResult {
       return bidAuction(w, cmd.auctionId, cmd.amount);
     case 'answerInbox':
       return answerInbox(w, cmd.cardId, cmd.choiceId);
+    case 'clearTips':
+      return clearTips(w, cmd.ids);
+    case 'postRequest':
+      return postRequest(w, cmd);
+    case 'acceptReply':
+      return acceptReply(w, cmd.requestId, cmd.companyId);
+    case 'cancelRequest':
+      return cancelRequest(w, cmd.requestId);
+    case 'saveBudget':
+      return saveBudget(w);
+    case 'hireExec':
+      return hireExec(w, cmd.id);
+    case 'fireExec':
+      return fireExec(w, cmd.id);
+    case 'raiseExec':
+      return raiseExec(w, cmd.id);
+    case 'exportGoods':
+      return exportGoods(w, cmd.to, cmd.good, cmd.qty);
+    case 'importGoods':
+      return importGoods(w, cmd.from, cmd.good, cmd.qty);
+    case 'acceptBarter':
+      return acceptBarter(w, cmd.id);
+    case 'openOffice':
+      return openOffice(w, cmd.nation);
+    case 'closeOffice':
+      return closeOffice(w, cmd.nation);
+    case 'hireResearcher':
+      return hireResearcher(w, cmd.id, cmd.companyId);
+    case 'fireResearcher':
+      return fireResearcher(w, cmd.companyId, cmd.id);
+    case 'startProject':
+      return startProject(w, cmd.companyId, cmd.kind);
+    case 'stopProject':
+      return stopProject(w, cmd.companyId);
+    case 'offerLicence':
+      return offerLicence(w, cmd.patentId, cmd.companyId, cmd.fee);
+    case 'acceptLicence':
+      return acceptLicence(w, cmd.patentId, cmd.companyId);
+    case 'clearBudget':
+      delete w.play.budget;
+      return ok('Plan cleared');
+    case 'pitchPartner':
+      return pitchPartner(w, cmd.good, cmd.partnerId, cmd.pct);
     case 'setMaintenance': {
       const c = myCompany(w, cmd.companyId);
       if (!c) return fail('Company not found');

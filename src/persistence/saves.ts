@@ -80,6 +80,8 @@ export interface Settings {
   autosave: boolean;
   /** Sound effects for sales, records and level-ups */
   sound?: boolean;
+  /** Pause the game when a tender opens for a product you make */
+  pauseTenders?: boolean;
 }
 const SETTINGS_KEY = 'ge.settings';
 

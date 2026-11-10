@@ -135,7 +135,7 @@ export function rivalStrike(w: WorldState, rv: Rival, x: Company, target: Compan
     const lost = Math.round(target.workers * 0.06);
     target.workers = Math.max(0, target.workers - lost);
     target.skill = clamp((target.skill ?? 1) - 0.03, 0.6, 1.2);
-    const bonus = round(target.workers * salaryOf(target) * target.salaryMult * wageIndex(w) * 4);
+    const bonus = round(target.workers * salaryOf(target) * target.salaryMult * wageIndex(w, target.industry) * 4);
     addNews(w, 'business', `${x.name} poaches staff from ${target.name}`, `${lost} experienced workers were lured away with higher pay.`, 'bad', [target.id]);
     return pushCard(w, {
       ...base, kind: 'rivalPoach', amount: bonus,

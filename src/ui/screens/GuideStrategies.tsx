@@ -87,7 +87,8 @@ const RUNNING: Feature[] = [
     how: [
       'Every choice is a trade-off: cash now against morale, customers or risk later.',
       'If you do not answer within two weeks, the default happens. It is rarely the best choice.',
-      'A manager can answer for you (Company › Running the business): a manager picks safe choices after two days, a top manager picks the best one at once.',
+      'A manager can answer for you (Company › Running the business): a manager picks safe choices after two days and keeps machines and supplies in order; a top manager picks the best one at once and runs the whole company.',
+      'A top manager checks price, customers, satisfaction, quality, pay, stock, the warehouse share and cash every week, and sends one report to your assistant. Upgrades and deals it recommends wait for you: tap Approve.',
     ],
     todo: 'Check the inbox once a month, and whenever a rival makes a move. Big, risky choices are worth your attention; hire managers for companies you do not want to watch.',
   },
@@ -179,9 +180,10 @@ const STRATEGIES: Feature[] = [
   },
   {
     icon: '🤝', name: 'Founding with partners',
-    see: 'Planner → any project over $5M (mega businesses, banks) → "Bring in a partner".',
+    see: 'Planner → any product → "Bring in a partner". Each partner shows how keen they are.',
     how: [
       'A partner pays the same share of the founding bill (plant plus permit) as the share of the company they get, up to 49%, so you keep control.',
+      'Make an offer. They say yes, ask for a different share (keen partners want more, unsure ones put in less) or say no. They look at your size and record, the market, and how well you get on. After three offers they want a break for a month.',
       'Rivals who know the industry and tycoons go up to 49%; other rivals and the Astoria Growth Fund up to 30%. They need the cash, and will not work with you if they dislike you.',
       'Partners get their share of the dividends and of the price if you sell. You can buy them out later from Financials.',
     ],
@@ -222,15 +224,45 @@ const STRATEGIES: Feature[] = [
   },
   {
     icon: '🏬', name: 'Warehouses', unlock: 'warehouse',
-    see: 'Deals & Strategies → Warehouses shows how full each one is, what is inside, its value and the daily cost.',
+    see: 'Business tab → Warehouses (or Deals & Strategies → Warehouses) shows how full each one is, what is inside, its value and the daily cost. Each company\'s Supply & Deals tab shows its own stored stock with Sell and Send buttons, and your assistant tells you when prices make it worth selling.',
     how: ['Build one for $400K (each next one costs 80% more) and upgrade it to level 10: +60% space a level. One warehouse holds any mix of products.', 'On a company\'s Overview, "Where your output goes" sends a share of each day\'s output to the warehouse (or turn on "Send extra output to the warehouse" in Automation to store only what it cannot sell).', 'Storage costs about $600 a day in rent plus a share of the stock\'s value. Durable goods lose 0.25% a month, food and crops far more, and anything kept over 3 months loses more each month. Electricity and services cannot be stored.', 'Sell by hand, or set auto-sell when the price is 10–40% above what you paid. Stock goes back to your company to sell, or to traders at 95% of the price if you do not make it.', 'From level 6, buy stock from the market with standing buy orders.'],
     todo: 'Store when prices are low, sell when demand and prices are high.',
   },
   {
     icon: '🏛️', name: 'Government tenders', unlock: 'tenders',
-    see: 'Deals & Strategies → Tenders: "City Hospital: 2,000 medicine a month for 6 months. Bids close in 10 days."',
-    how: ['Send a price per unit. 1–4 rival companies bid too, based on their costs and how aggressive their owner is.', 'Lowest price wins, but quality counts: each 0.1 of quality is worth 2.5% of price.', 'Winning gives you a guaranteed buyer for months; a short delivery costs a penalty in proportion.', 'More tenders appear when the economy slows down.'],
-    todo: 'Bid low enough to win but above your unit cost. The screen shows both.',
+    see: 'Your assistant (and a pause, if it is on in More) tells you when a tender opens: "New tender: City Hospital wants medicine. 2,000 a month for 9 months."',
+    how: ['Governments and big companies buy huge amounts over 6 to 12 months. Bids close after 14 days.', 'Tap Start tender to enter the tender room: you and 2–4 rivals take turns to bid lower. A rival drops out when it would go below its costs (aggressive owners go closer).', 'Lowest price wins, but quality counts (each 0.1 is worth 2.5% of price) and so does being able to deliver it all every day.', 'The room shows your cost, profit per unit, units a month, months, revenue and profit before you bid.', 'Deliveries are checked every month: a short month costs 10% of the missing units\' value.', 'Winning pays 15% of the whole contract up front; each delivery then pays the rest. Miss the contract and the unused part of the advance goes back.', 'Buyers reject bids below 80% of the market price: nobody believes a price that low.', 'Your record counts: each tender or board contract delivered in full is worth 1% of price in your favour, each one you fail costs 2% (up to 8% either way).', 'More tenders appear when the economy slows down.'],
+    todo: 'Stay above your unit cost: winning at a loss means losing money for a year. Drop out when the profit gets too thin.',
+  },
+  {
+    icon: '📮', name: 'Your own contract requests',
+    see: 'Deals & Strategies → Contracts → Post a request. Replies arrive in your assistant after about 2 days.',
+    how: ['Ask to buy an input, or offer your product, at your price, amount a day and length.', 'Companies that can do it reply within 2 days with their terms. Sign the one you like; the request closes after 9 days.', 'Up to 3 requests at once. A price far from the market gets no replies.'],
+    todo: 'Lock in cheap inputs before a shortage, or sell a year of output ahead.',
+  },
+  {
+    icon: '📊', name: 'Budget & forecast',
+    see: 'More → Budget & forecast, or the Budget card on the Business tab.',
+    how: ['A 12-month forecast of revenue, profit and cash for each company and all together, from the last 30 days, growing with the economy, after tax and dividends.', 'What if: move price, wages or marketing, or tick an upgrade, and compare against today. A higher price loses about 1.8% of sales for each 1%.', 'Save it as your plan: at the end of each month you see what you really made against it.'],
+    todo: 'Check an upgrade here before you buy it: it shows how many months it takes to pay back.',
+  },
+  {
+    icon: '👔', name: 'Executives',
+    see: 'More → Executives. Three candidates for each role every month, with stars, personality and salary.',
+    how: ['CFO: customers pay faster, up to 6% less tax, and a warning when a company will run out of cash within 3 months.', 'Head of Sales: customers come up to 35% faster and board contracts pay up to 5% more.', 'Operations Chief: workers make up to 7% more and machines wear up to 40% more slowly.', 'They work for all your companies. Hiring costs 30 days of salary, and so does letting someone go.', 'Underpaid or ambitious ones get unhappy, work less and may quit. A 10% raise cheers them up. Stars cost more and get calls from rivals.'],
+    todo: 'Hire when your empire is big enough that a few % on every company is worth more than the salary.',
+  },
+  {
+    icon: '🔬', name: 'R&D labs & patents',
+    see: 'Company → R&D: what research gives the company now, the current project, the team, and patents (yours and rivals\').',
+    how: ['Hire researchers (1–5 stars). Skill counts twice over, and someone from the company\'s own industry works almost twice as fast as an outsider. The R&D budget in Operations adds a little more. A Head of R&D (More › Executives) speeds up every lab.', 'Pick a project: cheaper production, better quality, or a premium version customers accept at a higher price.', 'Each project has 3 milestones. Every milestone gives a small gain that lasts (smaller each time you repeat the same kind).', 'At the end there is a rare breakthrough: usually 7–15%, up to 35% with top people. It becomes a 5-year patent: 18% cheaper units, +0.15 quality, or 12% more price room. A miss makes the next try on the same idea likelier.', 'Your patents help all your companies making the same product, and related products at half strength (cheaper production only).', 'License a patent to rivals for a fee on every unit they sell, or license theirs. Rivals research too: if one patents your idea first, your prize halves.'],
+    todo: 'Put the best people in the right field on your biggest product. A patent that cuts cost by 18% lets you undercut everyone and still win tenders.',
+  },
+  {
+    icon: '🌍', name: 'Countries & exports', unlock: 'world',
+    see: 'World tab: tap a country on the map to see what it is short of and has spare. Coloured dots show how it gets on with Astoria. Trade with… opens selling, buying and swaps.',
+    how: ['Eight countries, each with its own currency, tariff and days by sea. Short goods sell for up to 40% more than at home; spare goods are cheap to buy.', 'Ship goods from your warehouses. You pay shipping when the ship leaves, and they sell on arrival at that day\'s price and exchange rate, minus the tariff. Selling a lot at once lowers the price.', 'Buy spare goods to bring home into your warehouses (a 5% import tariff, none from allies).', 'Swaps: a country offers its spare goods for what it lacks, worth 5–22% more, with no tariff.', 'Countries trade with each other too. When two go to war they pay more for food, steel, medicine and fuel. If Astoria falls out with a country, trade with it stops and ships turn back.', 'Every trade builds goodwill: friends charge lower tariffs, allies less than half.', 'Each country has its own economy: a boom there means it pays more for what it buys, a recession means less. Its central bank raises rates in a boom, which pulls its currency up.', 'A trade office ($1.5M, $40K a month) halves that country\'s tariff, and ships there sail 30% faster and 25% cheaper.', 'Astoria signs free-trade deals with friends (no tariffs either way) and puts sanctions on countries it falls out with or that attack its allies (no trade at all).', 'The world reaches home: a war between oil exporters makes oil (and what importers charge for it) dearer in Astoria, a glut abroad makes it cheaper, and Astoria\'s exports fall when its trading partners fight, fall out with it, or see their money weaken.'],
+    todo: 'Store goods when home prices are low and ship them to whoever is short. Watch the exchange rate: a falling currency eats your profit.',
   },
   {
     icon: '⚔️', name: 'Price wars', unlock: 'wars',

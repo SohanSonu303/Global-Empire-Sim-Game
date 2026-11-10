@@ -120,7 +120,7 @@ describe('machines, staff and cash flow', () => {
     const w = createWorld(8);
     const c = found(w, 'clothing');
     applyCommand(w, { type: 'setMaintenance', companyId: c.id, level: 'low' });
-    run(w, 120, () => { c.last.produced = c.capacity; });
+    run(w, 160, () => { c.last.produced = c.capacity; });
     const worn = c.condition!;
     expect(worn).toBeLessThan(0.9);
     applyCommand(w, { type: 'setMaintenance', companyId: c.id, level: 'high' });

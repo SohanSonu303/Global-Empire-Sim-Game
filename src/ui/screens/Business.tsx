@@ -12,9 +12,55 @@ import { IconPlus } from '../components/Icons';
 import { playerCompanies, rating } from '../helpers';
 import { useAttention } from '../advice';
 import { ChainMapCard } from './Chain';
-import { unlocked } from '../../engine/rewards';
+import { unlockLevel, unlocked } from '../../engine/rewards';
+import { spaceOf, stockValue, usedSpace } from '../../engine/warehouse';
+import { forecastAll } from '../../engine/budget';
 
 type Filter = 'all' | IndustryId;
+
+/** Warehouses at a glance: what is stored, how full, one tap to sell or send. */
+function WarehousesCard() {
+  const w = useGame((s) => s.world)!;
+  const push = useGame((s) => s.push);
+  const open = unlocked(w, 'warehouse');
+  const whs = w.play.warehouses;
+  const space = whs.reduce((s, x) => s + spaceOf(x), 0);
+  const used = whs.reduce((s, x) => s + usedSpace(x), 0);
+  const full = space > 0 ? used / space : 0;
+  const value = stockValue(w);
+  const sub = !open ? `Unlocks at level ${unlockLevel('warehouse')}`
+    : !whs.length ? 'Store output and sell when prices are high'
+      : `${fmtMoney(value)} stored · ${Math.round(full * 100)}% full`;
+  return (
+    <Card className={cx('p-3 flex items-center gap-3', full > 0.9 && 'border-amber/60')} onClick={() => open && push({ screen: 'strategy', tab: 'warehouses' })}>
+      <span className="grid place-items-center size-11 rounded-lg bg-card-2 border border-line text-2xl">🏬</span>
+      <div className="flex-1 min-w-0">
+        <div className="font-bold">Warehouses</div>
+        <div className="text-sm text-muted truncate">{sub}</div>
+      </div>
+      {open && whs.length > 0 && full > 0.9 && <Badge tone="warn">Nearly full</Badge>}
+    </Card>
+  );
+}
+
+/** The 12-month outlook, one tap from the business list */
+function BudgetCard() {
+  const w = useGame((s) => s.world)!;
+  const push = useGame((s) => s.push);
+  if (!playerCompanies(w).length) return null;
+  const f = forecastAll(w);
+  const b = w.play.budget;
+  const last = b && b.actual.length ? { plan: b.plan[b.actual.length - 1], actual: b.actual[b.actual.length - 1] } : null;
+  return (
+    <Card className="p-3 flex items-center gap-3" onClick={() => push({ screen: 'budget' })}>
+      <span className="grid place-items-center size-11 rounded-lg bg-card-2 border border-line text-2xl">📊</span>
+      <div className="flex-1 min-w-0">
+        <div className="font-bold">Budget & forecast</div>
+        <div className="text-sm text-muted truncate">{last ? `Last month ${fmtMoney(last.actual)} vs plan ${fmtMoney(last.plan)}` : `Next 12 months: about ${fmtMoney(f.profit)} profit`}</div>
+      </div>
+    </Card>
+  );
+}
 
 /** Entry to the contracts board, tenders, warehouses, wars and tips. */
 function StrategyCard() {
@@ -66,6 +112,8 @@ export function BusinessScreen() {
       <div className="mt-3 space-y-2.5">
         <ChainMapCard />
         <StrategyCard />
+        <WarehousesCard />
+        <BudgetCard />
         {mine.map((c) => <BusinessRow key={c.id} c={c} flag={attention[c.id]} />)}
         <button
           onClick={plan}
