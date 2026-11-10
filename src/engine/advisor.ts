@@ -514,8 +514,8 @@ function adviseRunning(w: WorldState, c: Company, add: (a: Omit<Advice, 'company
   if (owed > 0 && c.cash < owed * 0.25 && c.sum30.netIncome > 0) {
     add({
       id: `owed-${c.id}`, severity: 'tip', title: `Customers owe ${c.name} ${fmtMoney(owed)}`,
-      body: `Business customers pay over about ${RECEIVABLE_DAYS} days, so profit arrives as cash later. With only ${fmtMoney(c.cash)} in the bank, one big bill means borrowing. Paying yourself smaller dividends for a while builds a buffer.`,
-      action: c.automation.dividendPct > 25 ? { type: 'command', label: 'Dividends to 25%', cmd: { type: 'setAutomation', companyId: c.id, automation: { dividendPct: 25 } } } : { type: 'openCompany', label: 'Open', companyId: c.id },
+      body: `This money is safe: business customers pay over about ${RECEIVABLE_DAYS} days, so about ${fmtMoney(owed / RECEIVABLE_DAYS)} of it arrives every day on its own. Until it does, ${c.name} has only ${fmtMoney(c.cash)} of its own cash. If a big bill like a repair comes first, the company borrows the rest from the bank and pays interest.${c.automation.dividendPct > 25 ? ` It now sends you ${c.automation.dividendPct}% of its daily profit. Taking 25% for a few weeks lets it save up; the rest is still yours, kept in the company.` : ''}`,
+      action: c.automation.dividendPct > 25 ? { type: 'command', label: 'Take 25% of profit', cmd: { type: 'setAutomation', companyId: c.id, automation: { dividendPct: 25 } } } : { type: 'openCompany', label: 'Open', companyId: c.id },
     });
   }
   // Fading products
