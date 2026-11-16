@@ -29,7 +29,7 @@ export type Route =
 
 export type StrategyTab = 'contracts' | 'auctions' | 'tenders' | 'warehouses' | 'wars' | 'tips';
 
-export type GuideSection = 'about' | 'play' | 'win' | 'grow' | 'business' | 'markets' | 'deals' | 'strategies' | 'economy' | 'world' | 'rivals';
+export type GuideSection = 'about' | 'play' | 'win' | 'grow' | 'business' | 'markets' | 'deals' | 'strategies' | 'paper' | 'economy' | 'world' | 'rivals';
 
 interface GameStore {
   world: WorldState | null;

@@ -19,6 +19,7 @@ const SECTIONS: { id: GuideSection; label: string }[] = [
   { id: 'markets', label: 'Stocks' },
   { id: 'deals', label: 'Stakes, takeovers & banks' },
   { id: 'strategies', label: 'Business strategies' },
+  { id: 'paper', label: 'Reading the paper' },
   { id: 'economy', label: 'A living economy' },
   { id: 'world', label: 'The world' },
   { id: 'rivals', label: 'Beat rivals' },
@@ -46,6 +47,7 @@ export function GuideScreen({ section = 'about' }: { section?: GuideSection }) {
         {tab === 'markets' && <Markets />}
         {tab === 'deals' && <Deals />}
         {tab === 'strategies' && <Strategies />}
+        {tab === 'paper' && <Paper />}
         {tab === 'economy' && <Economy />}
         {tab === 'world' && <World />}
         {tab === 'rivals' && <Rivals />}
@@ -181,7 +183,7 @@ function Play() {
       <SectionTitle>Your first 10 minutes</SectionTitle>
       <Steps
         items={[
-          { title: 'Start a company', body: 'Tap an empty plot on Home, or + New on Business. The Planner shows what is in demand, what it costs to start and a profit forecast.' },
+          { title: 'Start a company', body: 'Tap an empty plot on Home, or + New on Business. The Planner shows what is in demand, what it costs to start and a profit forecast. The forecast counts upkeep, maintenance and spare staff. A market tagged Crowded has more capacity than buyers, so a newcomer fills only part of its capacity. In hospitals prices are fixed, so empty beds stay empty.' },
           { title: 'Press Play', body: 'Watch Profit / day on Home. Your new company makes a small profit at first.' },
           { title: 'Claim your goals', body: "Today's Goals on Home give cash and XP. Tap Claim when a goal is done." },
           { title: 'Answer your inbox', body: 'Every month your staff and customers bring a few decisions, and rivals write when they make a move (Home › Inbox). Each choice says what it changes. Unanswered ones take the default after two weeks.' },
@@ -211,7 +213,7 @@ function Play() {
         <Lever icon={<IconBriefcase size={18} />} name="Business" effect="All your companies and the supply chain map. A dot means one needs attention." tip="Tap + New to open the planner and start another company." />
         <Lever icon={<IconChart size={18} />} name="Markets" effect="The stock exchange. Buy and sell shares of 20 companies." tip="The mood bar shows if investors feel bullish or bearish." />
         <Lever icon={<IconGlobe size={18} />} name="World" effect="Astoria's economy: growth, inflation, jobs and interest rates. From level 5, the other eight countries and trade with them." tip="High interest rates make loans expensive." />
-        <Lever icon={<IconDots size={18} />} name="More" effect="Newspaper, rivals, statistics, achievements, saves and this guide." tip="Read the newspaper to see what rivals are doing." />
+        <Lever icon={<IconDots size={18} />} name="More" effect="Newspaper, rivals, statistics, achievements, saves and this guide." tip="Read the newspaper for stock tips, which industries are growing and what rivals are doing." />
       </Card>
     </>
   );
@@ -244,7 +246,7 @@ function Win() {
       <SectionTitle>The road to number one</SectionTitle>
       <Steps
         items={[
-          { title: '1. One profitable company', body: 'Pick a product that is short (the Planner shows it). Hire until output nears capacity and price close to the market. Most plants pay back in one to two years.' },
+          { title: '1. One profitable company', body: 'Pick a product that is short (the Planner shows it). Hire until output nears capacity and price close to the market. Most plants pay back in one to two years. Crowded markets, like hospitals, take longer.' },
           { title: '2. Grow it, then build a chain', body: 'Upgrade when it sells out. Then start the companies that supply it, so you keep the margin your suppliers made, and sell what is left to others.' },
           { title: '3. Put spare money to work', body: 'Idle cash earns nothing. Buy dividend shares, buy stakes in private companies, bid at bankruptcy auctions, and win government tenders.' },
           { title: '4. Spread out (level 5+)', body: 'Open the world: ship goods where they are short, buy where they are spare, and open trade offices in your best markets. Use R&D to patent cheaper ways to make things.' },
@@ -255,10 +257,48 @@ function Win() {
       <Card className="divide-y divide-line">
         <Lever icon="📉" name="Watch your margin" effect="Profit ÷ sales. Above 10% is healthy for most goods; regulated care runs 5–8%." tip="If it falls, check prices, wages and input costs on the company's Overview." />
         <Lever icon="💵" name="Never run dry" effect="A company below zero cash for about 45 days goes bankrupt." tip="Keep a buffer, and lower dividends before a big upgrade." />
-        <Lever icon="🔔" name="Listen to the assistant" effect="It warns about shortages on the way, price wars, cash trouble and chances abroad." tip="Each tip has a button that takes you straight to the fix." />
+        <Lever icon="🔔" name="Listen to the assistant" effect="It warns about shortages on the way, price wars, cash trouble and chances abroad." tip="Each tip has a button that takes you straight to the fix. Tap the cross to clear one, or Clear all. A cleared tip comes back only if the problem is still there after two weeks." />
         <Lever icon="🧭" name="Read the cycle" effect="Save cash in a boom. In a slump weak rivals go bankrupt and their plants are sold cheaply at auction." tip="The World tab shows where Astoria is in its cycle." />
       </Card>
+      <Tip>Your companies sell to each other at a discount (20% by default). A mine that sells only to your own steel mill can look like it loses money while the group as a whole earns. Change the discount on the company's Supply tab.</Tip>
+      <Tip>The game installs like an app (use Add to Home Screen) and works offline. It checks for new versions when you reopen it and tells you when it has updated.</Tip>
       <Tip>A company that stays below zero cash goes bankrupt and is sold at auction. Spread your risk over several companies and industries.</Tip>
+    </>
+  );
+}
+
+function Paper() {
+  return (
+    <>
+      <Hero art={<div className="text-6xl">📰</div>} title="Read the paper, then place your bets">
+        The Astoria Times (More › Newspaper) turns the economy into stories you can act on: which industries are growing,
+        which shares may move, and where a new company has room to earn.
+      </Hero>
+      <SectionTitle>The Tipster</SectionTitle>
+      <Steps
+        items={[
+          { title: 'A tip comes out', body: 'Every week or so the paper prints a call such as "Tipster: Redrock Mining (RRM) could rise". It gives its reasons and the date its story should break.' },
+          { title: 'The story breaks', body: 'On that date news hits the share. If the story was true the price is pushed the way of the tip. If it was false it is pushed the other way.' },
+          { title: 'It is judged a week later', body: 'The paper marks each tip Right or Wrong by what the share price did, and keeps a score. Expect it to be right only about half the time.' },
+          { title: 'You decide', body: 'Check the reasons against the stock page (Markets › a stock shows "The Astoria Times says"). A tip with strong reasons is a better bet than a tip with none, but no tip is a promise.' },
+        ]}
+      />
+      <Tip>Never put all your money on one tip. Read why it was made, buy a small amount, and sell if the story turns out false.</Tip>
+      <SectionTitle>Industry Watch</SectionTitle>
+      <Card className="divide-y divide-line">
+        <Lever icon="🔥" name="Heating up / Growing" effect="Buyers want more every year, supply is short or prices are rising, and margins are healthy." tip="A good place to found a company or buy shares, but newcomers may follow you in." />
+        <Lever icon="➖" name="Steady" effect="Good and bad points about cancel out." tip="Safe, with no big win expected." />
+        <Lever icon="🧊" name="Cooling / Under pressure" effect="Too much capacity, falling prices, rising wages or many newcomers." tip="Avoid big upgrades here. Wait for a slump to buy cheaply." />
+        <Lever icon="📖" name="Good points, but bad points" effect="Each industry shows what is helping it and what is hurting it, so you see the whole picture." tip="Tap a row to open the Planner for that industry." />
+      </Card>
+      <SectionTitle>Where to put your money</SectionTitle>
+      <Steps
+        items={[
+          { title: 'Start a company', body: 'The paper lists the three best places to start now. The Planner has the full list, with a profit forecast.' },
+          { title: 'Buy shares', body: 'Top and bottom movers show where investors are heading. Shares in a growing industry tend to follow it, but nothing is certain.' },
+          { title: 'Mix them', body: 'Keep some money in companies you run and some in shares of other industries. A bad story in one should not sink you.' },
+        ]}
+      />
     </>
   );
 }
