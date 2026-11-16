@@ -4,6 +4,7 @@ import './index.css';
 import App from './App';
 import { useGame } from './store/game';
 import { startUpdateChecks } from './state/pwaUpdate';
+import { inject } from '@vercel/analytics';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -24,6 +25,9 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     );
   }
 }
+
+// Free Vercel Web Analytics: page views only, no cookies, no personal data. Fails quietly if blocked or offline.
+try { inject(); } catch { /* analytics must never break the game */ }
 
 // Pick up new builds when the app is reopened or comes back to the front
 startUpdateChecks((version) => useGame.getState().notify(`Updated to the latest version (${version}).`));
